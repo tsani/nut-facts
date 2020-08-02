@@ -22,7 +22,8 @@ c.execute("""
   AND nutrient.id = common_nutrient.id
 """, (sys.argv[1],))
 vals = {}
+print(c)
 for row in c:
   vals[row[0]] = str(row[2]) + ' ' + row[1]
 
-print json.dumps(vals, sort_keys=True, indent=4)
+print(json.dumps(vals, sort_keys=True, indent=4))
