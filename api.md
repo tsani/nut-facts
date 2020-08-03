@@ -1,6 +1,25 @@
 Nut API
 =======
 
+`/food/:id/weights`
+----------
+
+### GET -- retrieves available weights for a food
+
+The `food_id` is specified as part of the URL.
+
+Example return object:
+```
+{ "weights": [ <list of weight objects> ] }
+```
+
+and each weight object is
+```
+{ "name": <string>, "seq_num": <int> }
+```
+
+The `seq_num` uniquely identifies this quantity type for the `food_id`.
+
 `/search`
 ---------
 
