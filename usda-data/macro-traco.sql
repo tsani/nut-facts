@@ -1,7 +1,7 @@
-DROP TABLE IF EXISTS `marco_traco`;
+DROP TABLE IF EXISTS `macro_traco`;
 CREATE TABLE `macro_traco` (
-  date INTEGER NOT NULL,
+  id int PRIMARY KEY,
+  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
   consumer text NOT NULL,
-  nutrients_json text NOT NULL,
-  PRIMARY KEY(date, consumer)
+  nutrients_json text NOT NULL
 );

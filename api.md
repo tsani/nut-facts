@@ -5,6 +5,7 @@ Nut API
 ----------
 
 ### GET -- retrieves available weights for a food
+# done, check `get_weights`
 
 The `food_id` is specified as part of the URL.
 
@@ -15,15 +16,17 @@ Example return object:
 
 and each weight object is
 ```
-{ "name": <string>, "seq_num": <int> }
+{ "name": <string>, "seq_num": <int>, "grams": <int> }
 ```
-
+`grams` indicates how many grams are in one unit of `seq_num` (ex 1 cup = 244g)
 The `seq_num` uniquely identifies this quantity type for the `food_id`.
 
 `/search`
 ---------
 
 ### GET -- lists foods and recipes
+# done (create recipe ONLY) see `list_foods_recipes`
+
 
 Uses a query string parameter to specify search terms, e.g.
 
@@ -52,6 +55,7 @@ in case of a food.
 ----------
 
 ### POST -- creates (or modifies) a recipe
+# done (create ONLY) see `insert_to_db`
 
 Example request
 
