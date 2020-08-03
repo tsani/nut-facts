@@ -1,0 +1,7 @@
+DROP TABLE IF EXISTS `marco-traco`;
+CREATE TABLE `macro-traco` (
+  date INTEGER NOT NULL,
+  consumer text NOT NULL,
+  nutrients-json text NOT NULL,
+  PRIMARY KEY(date, consumer)
+);

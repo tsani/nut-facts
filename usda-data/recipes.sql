@@ -1,6 +1,6 @@
 DROP TABLE IF EXISTS `recipe`;
 CREATE TABLE `recipe` (
-  id int PRIMARY KEY NOT NULL,
+  id INTEGER PRIMARY KEY,
   name text NOT NULL
 );
 
