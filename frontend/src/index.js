@@ -9,19 +9,19 @@ function makeURL(path, qs) {
     return path
 }
 
-/* mock data that could be returned from the API */
-const FAKE_SEARCH_DATA = [
-  { recipe_id: 1, name: "shake" },
-  { food_id: 1, name: "pasta" },
-  { recipe_id: 2, name: "amazing meal 1" },
-  { food_id: 2, name: "apple" },
-  { recipe_id: 3, name: "amazing meal 2" },
-];
+// /* mock data that could be returned from the API */
+// const FAKE_SEARCH_DATA = [
+//   { recipe_id: 1, name: "shake" },
+//   { food_id: 1, name: "pasta" },
+//   { recipe_id: 2, name: "amazing meal 1" },
+//   { food_id: 2, name: "apple" },
+//   { recipe_id: 3, name: "amazing meal 2" },
+// ];
 
-const FAKE_WEIGHTS = [
-  { name: "grams", seq_num: 0 },
-  { name: "1 cup, shredded", seq_num: 1 },
-];
+// const FAKE_WEIGHTS = [
+//   { name: "grams", seq_num: 0 },
+//   { name: "1 cup, shredded", seq_num: 1 },
+// ];
 
 // Formats an edible returned from the API into the form we used in
 // the client.
@@ -38,15 +38,15 @@ const RECIPE_WEIGHTS = [
   { name: "fraction", seq_num: -1 },
 ];
 
-const getFakeWeights = (edible) =>
-  new Promise(
-    (resolve, reject) => {
-      if(edible.type === 'recipe')
-        resolve(RECIPE_WEIGHTS);
-      else
-        resolve(FAKE_WEIGHTS);
-    }
-  );
+// const getFakeWeights = (edible) =>
+//   new Promise(
+//     (resolve, reject) => {
+//       if(edible.type === 'recipe')
+//         resolve(RECIPE_WEIGHTS);
+//       else
+//         resolve(FAKE_WEIGHTS);
+//     }
+//   );
 
 function getWeights(edible) {
   if(edible.type === 'recipe')
@@ -56,22 +56,22 @@ function getWeights(edible) {
     console.log("requesting weights for edible", edible, 'url:', url);
     return fetch(url)
       .then(res => res.json())
-      .then(data => data.weights);
+      .then(data => [ {seq_num: 0, name: 'gram', grams: 1}, ...data.weights ]);
   }
 }
 
-// In the fake search, we do the filtering client-side;
-// In the real search, the filtering happens server-side.
-function getFakeSearchResults (query) {
-  const terms = query.split(" ");
-  const matchesTerms = (edible) =>
-    terms.every(t => edible.value.includes(t));
-
-  return new Promise( (resolve, reject) =>
-    resolve(FAKE_SEARCH_DATA) )
-    .then(results =>
-      results.map(formatEdible).filter(matchesTerms));
-}
+// // In the fake search, we do the filtering client-side;
+// // In the real search, the filtering happens server-side.
+// function getFakeSearchResults (query) {
+//   const terms = query.split(" ");
+//   const matchesTerms = (edible) =>
+//     terms.every(t => edible.value.includes(t));
+//
+//   return new Promise( (resolve, reject) =>
+//     resolve(FAKE_SEARCH_DATA) )
+//     .then(results =>
+//       results.map(formatEdible).filter(matchesTerms));
+// }
 
 function getSearchResults(terms) {
   if(terms.length >= 3)
@@ -94,45 +94,58 @@ function withLoading(LoadingComponent, LoadedComponent) {
   }
 }
 
+// Basic component that renders its children only when a condition is
+// true.
+const EnableIf = (props) => {
+  if(props.condition)
+    return props.children;
+  else
+    return null;
+};
+
 const Spinner = (props) => <span className="lds-dual-ring"></span>;
 
 const WeightPicker =
   withLoading(
     Spinner,
     (props) => {
-      const [ amount, setAmount ] = useState("");
-      const [ weightType, setWeightType ] = useState(null);
+      // const handleTextChange = (event) => {
+      //   setAmount(event.target.value);
+      //   event.preventDefault();
+      //   props.setAmount({ amount: amount, unit: weightType });
+      // };
 
-      const handleTextChange = (event) => {
-        setAmount(event.target.value);
-        event.preventDefault();
-        props.setAmount({ amount: amount, unit: weightType });
-      };
+      // const handleSelectChange = (event) => {
+      //   setWeightType(props.weights[parseInt(event.target.value)]);
+      //   event.preventDefault();
+      //   props.setAmount({ amount: amount, unit: weightType });
+      // }
 
-      const handleSelectChange = (event) => {
-        setWeightType(props.weights[parseInt(event.target.value)]);
-        event.preventDefault();
-        props.setAmount({ amount: amount, unit: weightType });
-      }
 
       return (
         <div className="weight-picker">
           <input
             type="text"
-            value={amount}
-            onChange={(event) => handleTextChange(event)}
+            name="amount"
+            value={props.weight.amount}
+            onChange={event =>
+              props.handleChange({[event.target.name]: event.target.value})
+            }
           />
-          <select name="unit">
-            { props.weights === null ? null :
-            props.weights.map(
-            (unit, i) =>
-            <option
-              key={props.edibleId + '-' + unit.seq_num}
-              value={i}
-              onChange={(event) => handleSelectChange(event)}
-            >
-              {unit.name}
-            </option>)
+          <select
+            name="seq_num"
+            onChange={e =>
+              props.handleChange({[e.target.name]: parseInt(e.target.value)})
+            }
+          >
+            { props.weights.map(unit =>
+              <option
+                name="seq_num"
+                key={`${props.edibleId}-${unit.seq_num}`}
+                value={unit.seq_num}
+              >
+                {unit.name}
+              </option>)
             }
       </select>
     </div>
@@ -140,35 +153,33 @@ const WeightPicker =
     });
 
 function Edible(props) {
-  return <li onClick={e => props.handleClick(props, e)}>{props.value}</li>;
+  return <li onClick={e => props.handleClick(e)}>{props.label}</li>;
 }
 
 // Component for selecting a food or recipe and then a quantity for it.
 function EdibleSelector(props) {
+  const [searchTerms, setSearchTerms] = useState('');
   const [edibles, setEdibles] = useState([]);
   const [weights, setWeights] = useState(null);
 
   useEffect(() => {
-    if(props.searchTerms && null === props.selectedEdible) {
-      getSearchResults(props.searchTerms)
+    if(searchTerms && null === props.eaten.edible) {
+      getSearchResults(searchTerms)
       .then(setEdibles)
     }
-  }, [props.searchTerms, props.selectedEdible]);
+  }, [searchTerms, props.eaten]);
 
   useEffect(() => {
-    if(null !== props.selectedEdible) {
-      getWeights(props.selectedEdible)
+    if(null !== props.eaten.edible) {
+      getWeights(props.eaten.edible)
         .then(ws => {
           console.log("got weights", ws);
           setWeights(ws);
         })
     }
-  }, [props.selectedEdible]);
+  }, [props.eaten.edible]);
 
-  const edibleKey = (edible) =>
-    edible.type + '-' + edible.id;
-
-  if(null === props.selectedEdible) {
+  if(null === props.eaten.edible) {
     return (
       <div className="edible-selector">
         <div className="dropdown">
@@ -176,17 +187,19 @@ function EdibleSelector(props) {
             autoFocus
             type="text"
             placeholder="Type to find a food or recipe..."
-            onChange={props.handleChange}
-            value={props.searchTerms}
+            onChange={e => setSearchTerms(e.target.value)}
+            value={searchTerms}
           />
           <ul>
             {edibles.map(edible =>
               <Edible
-                key={edibleKey(edible)}
-                type={edible.type}
-                id={edible.id}
-                value={edible.value}
-                handleClick={props.selectEdible} />)}
+                key={`${edible.type}-${edible.id}`}
+                label={edible.value}
+                handleClick={() =>
+                  props.handleEatenChange({edible: edible})
+                }
+              />)
+            }
           </ul>
         </div>
       </div>
@@ -198,76 +211,54 @@ function EdibleSelector(props) {
         <div className="selected-edible">
           <span
             className="cancel-edible-selection"
-            onClick={() => props.selectEdible(null)}>
+            onClick={() => props.handleEatenChange({edible: null})}>
             X
           </span>
-          {props.selectedEdible.value}
+          {props.eaten.edible.value}
         </div>
         <WeightPicker
-          edibleId={props.selectedEdible.id}
-          handleSelect={props.selectWeight}
+          edibleId={props.eaten.edible.id}
+          weight={props.eaten.weight}
+          handleChange={weight =>
+            props.handleEatenChange({weight: {...props.eaten.weight, ...weight}})
+          }
           weights={weights}
           ready={weights}
-          setAmount={props.setAmount}
         />
       </div>
     );
   }
 }
 
-const EnableIf = (props) => {
-  if(props.condition)
-    return props.children;
-  else
-    return null;
-};
-
 function EatSomething(props) {
-  const [ searchTerms, setSearchTerms ] = useState("");
-  const [ selectedEdible, setSelectedEdible ] = useState(null);
-  const [ amount, setAmount ] = useState(null);
-  const [ consumerName, setConsumerName ] = useState("");
-
-  const handleChange = (event) => {
-    setSearchTerms(event.target.value);
-    event.preventDefault();
-  };
-
-  const handleSubmit = () =>
-    props.handleSubmit({
-      edible: selectedEdible,
-      amount: amount,
-      consumer: consumerName
-    });
-
   return (
     <div>
       <EdibleSelector
-        searchTerms={searchTerms}
-        handleChange={handleChange}
-        selectedEdible={selectedEdible}
-        selectEdible={setSelectedEdible}
-        setAmount={setAmount}
+        eaten={props.eaten}
+        handleEatenChange={props.handleEatenChange}
       />
       <EnableIf
-        condition={null !== selectedEdible && null !== amount}>
-        <label for="consumer-name">
+        condition={null !== props.eaten.edible && null !== props.eaten.amount}
+      >
+        <label htmlFor="consumer">
           <span className="label-text">Consumer</span>
 
           <input
-            name="consumer-name"
+            name="consumer"
             type="text"
             placeholder="Your name"
-            value={consumerName}
-            onChange={(event) => setConsumerName(event.target.value)}
+            value={props.eaten.consumer}
+            onChange={e =>
+              props.handleEatenChange({[e.target.name]: e.target.value})
+            }
           />
         </label>
       </EnableIf>
-      <EnableIf condition={consumerName}>
+      <EnableIf condition={props.eaten.consumer}>
         <div>
           <button
             type="submit"
-            onClick={handleSubmit}
+            onClick={props.handleSubmit}
           >
             I ate it!
           </button>
@@ -277,17 +268,74 @@ function EatSomething(props) {
   );
 }
 
-function App(props) {
-  return (
-    <div>
-      <h1>Macro-Micro-Tracko</h1>
+// Executes a fetch, setting a flag to true while the request is in
+// flight and setting it back to false after.
+function exFetch(setStatus, ...rest) {
+  setStatus(true);
+  return fetch(...rest)
+    .then(
+      res => {
+        setStatus(false);
+        return res;
+      },
+      e => {
+        setStatus(false);
+        throw e;
+    });
+}
+
+function MacroTraco(props) {
+  const INITIAL_EATEN = {edible: null, weight: {amount: '', seq_num: 0}, consumer: ''};
+  const [ eaten, setEaten ] = useState({...INITIAL_EATEN});
+  const [ submitting, setSubmitting ] = useState(false);
+  const [ error, setError ] = useState(false);
+
+  const handleEatenChange = (e) => {
+    // let newEaten = {...eaten, ...e}
+    // console.log("Now eaten is", newEaten);
+    setEaten({...eaten, ...e});
+  };
+
+  const handleSubmit = () => {
+    exFetch(setSubmitting, '/eat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(eaten)
+    })
+      .then(res => {
+        setSubmitting(false);
+        setError(!res.ok);
+        if(res.ok)
+          setEaten({...INITIAL_EATEN});
+      })
+      .catch(e => { setError(true); throw e; });
+  };
+
+  if(!submitting) {
+    return (
       <div>
-        <h2> Eat something? </h2>
-        <EatSomething handleSubmit={() => alert("oh?")}/>
+        <h1>Macro-Micro-Tracko</h1>
+        <div>
+          <h2> Eat something? </h2>
+          <EnableIf condition={error}>
+            <p>Uh-oh, something went wrong!</p>
+          </EnableIf>
+          <EatSomething
+            eaten={eaten}
+            handleEatenChange={handleEatenChange}
+            handleSubmit={handleSubmit}
+          />
+        </div>
       </div>
-      <p> This is some other random content for example. </p>
-    </div>
-  );
+    );
+  }
+  else {
+    return <Spinner/>
+  }
+}
+
+function App(props) {
+  return <MacroTraco/>
 }
 
 ReactDOM.render(

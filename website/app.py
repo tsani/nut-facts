@@ -1,19 +1,34 @@
 from flask import (
     Flask, send_from_directory, render_template, url_for, request,
-    redirect, flash, session, abort, jsonify
+    redirect, flash, session, abort, jsonify, g
 )
 import requests
 import sqlite3
 import datetime
 import json
+import sys
 from os import environ
 
-#IS_DEV = environ["FLASK_ENV"] == "dev"
+DATABASE_PATH = '../usda-data/usda.sql3'
+
 IS_DEV = environ.get("FLASK_ENV") == "dev"
 WEBPACK_DEV_SERVER_HOST = "http://localhost:3000"
 
 app = Flask(__name__, static_folder=None if IS_DEV else '/static')
-db = sqlite3.connect('../usda-data/usda.sql3')
+
+def get_db():
+    """Opens a connection to the database for this request."""
+    db = getattr(g, '_database', None)
+    if db is None:
+        db = g._database = sqlite3.connect(DATABASE_PATH)
+    return db
+
+@app.teardown_appcontext
+def close_connection(exc):
+    """Closes any database connection opened in this request."""
+    db = getattr(g, '_database', None)
+    if db is not None:
+        db.close()
 
 class Food_nut_fact:
     def __init__(self, nut_facts):
@@ -70,7 +85,7 @@ if IS_DEV:
 
 # adds nutrients to someone's daily tally
 def add_macro_traco(consumer, python_nutrients):
-    db = sqlite3.connect('../usda-data/usda.sql3')
+    db = get_db()
     print("inserting into marco_traco table")
     db.execute("INSERT INTO macro_traco (consumer, nutrients_json) VALUES (?, ?)", (consumer, json.dumps(python_nutrients)))
     db.commit()
@@ -100,7 +115,7 @@ def sum_day_macro(consumer, year, month, day):
     return total_day_nut_fact
 
 def get_weights(food_id):
-    db = sqlite3.connect('../usda-data/usda.sql3')
+    db = get_db()
     c = db.cursor()
     c.execute("""
     SELECT
@@ -123,6 +138,8 @@ def get_weights(food_id):
 # returns the nutrient info of a food
 # takes the food id, food seq num, and factor
 def calculate_nutrients(food_id, seq_num, factor):
+    print('factor', factor)
+    db = get_db()
     c = db.cursor()
     # (food_id, seq_num) identifies a specific number of some unit in the DB.
     # Note the weight table has an 'amount' column, so when looking
@@ -149,18 +166,15 @@ def calculate_nutrients(food_id, seq_num, factor):
     FROM nutrition JOIN nutrient JOIN common_nutrient
     ON nutrition.food_id = ? AND nutrition.nutrient_id = nutrient.id AND nutrient.id = common_nutrient.id
     """, (scaled_gm_w, food_id))
-    print(c)
+
     vals = {}
-    # structure of vals: dict of string, tuple (float, string) pairs
-    # vals = {'nutrient' : (float amt, 'unit')}
     for row in c:
-        # If all calculated were done in the DB, then no math should
-        # be needed in this loop to build the dict.
-        # Btw look up a tutorial on python dictionary
-        # comprehension. It's like list comprehension but for building
-        # a dictionary. You can probably build the dict in a 1-liner
-        # that way.
-        vals[row[0]] = ((row[2]*factor), row[1])
+        vals[ row[0] ] = (factor * row[2], row[1])
+    # vals = {
+    #     row[0]: eff(lambda: print(row), lambda: ((factor * row[2]), row[1]))
+    #     for row in c
+    # }
+
     c.close();
     return vals
 
@@ -170,6 +184,7 @@ def seq_weight_in_g(food_id, seq_num):
     #ex 3 crackers = 30g will return 10g because that's the weight of a single item
     if seq_num == 0:
         return 1
+    c = get_db().cursor()
     c.execute("""
     SELECT gm_weight/amount
     FROM weight
@@ -180,6 +195,7 @@ def seq_weight_in_g(food_id, seq_num):
 
 def calculate_recipe_nutrients(recipe_id, seq_num, factor):
     #Calculate the nutrients in a recipe.
+    db = get_db()
     c = db.cursor()
     c.execute("""
     SELECT food_id, amount, seq_num, display_unit
@@ -229,15 +245,17 @@ test_recipe = {
 # inserts a new json recipe into the DB, including ingredients
 def insert_to_db(json_recipe):
     recipe_name = json_recipe["name"]
-    db.execute("INSERT INTO recipe (name) VALUES (?)", (recipe_name,))
-    for x in db.execute("SELECT id FROM recipe WHERE name=(?)", (recipe_name,)):
+    db = get_db()
+    c = db.cursor()
+    c.execute("INSERT INTO recipe (name) VALUES (?)", (recipe_name,))
+    for x in c.execute("SELECT id FROM recipe WHERE name=(?)", (recipe_name,)):
         recipe_id = x[0]
     for ingredient in json_recipe["ingredients"]:
-        db.execute(
+        c.execute(
             "INSERT INTO ingredient (recipe_id, food_id, amount, seq_num, display_unit) VALUES (?,?,?,?,?)",
             (recipe_id, ingredient["food_id"], ingredient["amount"], ingredient["seq_num"], ingredient["display_unit"],))
-    db.commit()
-    db.close()
+    c.commit()
+    c.close()
 
 def list_foods_recipes(search_terms):
     """Accepts a list of words that must appear in the long
@@ -274,6 +292,30 @@ def search():
 def weights(food_id):
     return jsonify(get_weights(int(food_id)))
 
+@app.route('/eat', methods=['POST'])
+def eat():
+    # keys: edible, weight, consumer (string)
+    # edible keys: type ('food' or 'recipe'), id
+    # weight keys: seq_num, amount
+    eaten = request.json
+    f = None
+    if(eaten['edible']['type'] == 'food'):
+        f = calculate_nutrients
+    else:
+        assert eaten['edible']['type'] == 'recipe'
+        f = calculate_recipe_nutrients
+
+    nut = f(
+        int(eaten['edible']['id']),
+        int(eaten['weight']['seq_num']),
+        float(eaten['weight']['amount'])
+    )
+
+    add_macro_traco(eaten['consumer'], nut)
+    return jsonify({})
+
 if __name__ == '__main__':
-    pass
-    #app.run(host="0.0.0.0")
+    if len(sys.argv) > 1 and sys.argv[1] == 'test':
+        pass
+    else:
+        app.run(host="0.0.0.0")
