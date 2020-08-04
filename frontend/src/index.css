@@ -1,0 +1,74 @@
+* {
+    box-sizing: border-box;
+}
+
+div#root {
+    max-width: 8in;
+    margin: 0 auto;
+}
+
+div.dropdown > input[type="text"] {
+    border: 2px solid #ccc;
+    padding: 0.5ex;
+    border-radius: 5px;
+    width: 100%;
+}
+
+div.dropdown > ul {
+    padding: 0;
+    margin: 0;
+    /* position: relative;*/
+    width: 100%;
+}
+
+div.dropdown > ul > li {
+    padding: 0.5ex;
+    list-style-type: none;
+    margin: 0;
+    border: 2px solid black;
+}
+
+div.dropdown > ul > li:hover {
+    background-color: #4af;
+    cursor: pointer;
+}
+
+div.selected-edible .cancel-edible-selection {
+    float: right;
+    cursor: pointer;
+}
+
+.lds-dual-ring {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+}
+
+.lds-dual-ring:after {
+  content: " ";
+  display: block;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border-radius: 50%;
+  border: 2px solid #888;
+  border-color: #888 transparent #888 transparent;
+  animation: lds-dual-ring 1.2s linear infinite;
+}
+
+@keyframes lds-dual-ring {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.label-text {
+    margin-right: 1em;
+}
+
+div.weight-picker {
+    margin: 1em 0;
+}
