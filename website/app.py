@@ -8,7 +8,8 @@ import datetime
 import json
 from os import environ
 
-IS_DEV = environ["FLASK_ENV"] == "dev"
+#IS_DEV = environ["FLASK_ENV"] == "dev"
+IS_DEV = environ.get("FLASK_ENV") == "dev"
 WEBPACK_DEV_SERVER_HOST = "http://localhost:3000"
 
 app = Flask(__name__, static_folder=None if IS_DEV else '/static')
@@ -34,6 +35,14 @@ class Food_nut_fact:
         return str(self.nut_fact)
     def __repr__(self):
         return repr(self.nut_fact)
+    def __mul__(self, multiplicand):
+        new_dic = self.nut_fact.copy()
+        for key in self.nut_fact:
+            value, unit = self.nut_fact[key]
+            new_dic[key] = value * multiplicand, unit
+        return Food_nut_fact(new_dic)
+
+
 
 def proxy(host, path):
     """ Used to proxy a request for a resource to another server. """
@@ -75,16 +84,9 @@ def sum_day_macro(consumer, year, month, day):
     db = sqlite3.connect('../usda-data/usda.sql3')
     c = db.cursor()
     c.execute("""
-    SELECT
-    nutrients_json
-    FROM
-    macro_traco
-    WHERE
-    timestamp
-    BETWEEN
-    (?) AND (?)
-    AND
-    consumer=(?)
+    SELECT nutrients_json
+    FROM macro_traco
+    WHERE timestamp BETWEEN (?) AND (?) AND consumer=(?)
     """, (date_start, date_end, consumer))
     print(c)
     # structure of vals: dict of string, tuple (float, string) pairs
@@ -127,28 +129,27 @@ def calculate_nutrients(food_id, seq_num, factor):
     # up, divide the gm_weight by the amount to get the true per unit
     # gram equivalent weight.
     # That gives the weight of the food consumed, in grams.
+    if (seq_num > 0):
+        scaled_gm_w = seq_weight_in_g(food_id, seq_num)
 
+    elif(seq_num == 0):
+        scaled_gm_w = 1
+
+    else:
+        print("sent invalid seq_num!" + str(seq_num))
+        raise
     # Next, look up the nutrient values for the food.
     # Nutrient values are stored per 100g, so to get the nutrient
     # value for the consumed amount, divide the stored nutrient value
     # by 100 (to get nutrient value/g) and then multiply by the
     # consumed food weight to get the consumed nutrient value.
 
-    # Try to use the DB where possible to do the calculation for you.
-
-    # call it scaled_gm_weight
     c.execute("""
-    SELECT
-    name, units, amount
-    FROM
-    nutrition JOIN nutrient JOIN common_nutrient
-    ON
-    nutrition.food_id = ?
-    AND nutrition.nutrient_id = nutrient.id
-    AND nutrient.id = common_nutrient.id
-    """, (food_id,))
+    SELECT name, units, (amount/100 * (?))
+    FROM nutrition JOIN nutrient JOIN common_nutrient
+    ON nutrition.food_id = ? AND nutrition.nutrient_id = nutrient.id AND nutrient.id = common_nutrient.id
+    """, (scaled_gm_w, food_id))
     print(c)
-    c.close();
     vals = {}
     # structure of vals: dict of string, tuple (float, string) pairs
     # vals = {'nutrient' : (float amt, 'unit')}
@@ -160,38 +161,59 @@ def calculate_nutrients(food_id, seq_num, factor):
         # a dictionary. You can probably build the dict in a 1-liner
         # that way.
         vals[row[0]] = ((row[2]*factor), row[1])
+    c.close();
     return vals
 
+def seq_weight_in_g(food_id, seq_num):
+    #gets food id and its seq num
+    #calculates what is the weight of that seq number?
+    #ex 3 crackers = 30g will return 10g because that's the weight of a single item
+    if seq_num == 0:
+        return 1
+    c.execute("""
+    SELECT gm_weight/amount
+    FROM weight
+    WHERE food_id = (?) AND sequence_num = (?)""", (food_id, seq_num))
+
+    for row in c:
+        return row[0]
+
 def calculate_recipe_nutrients(recipe_id, seq_num, factor):
-    """Calculate the nutrients in a recipe.
-    The quantity of the recipe consumed is expressed using a number of
-    grams or a total recipe fraction. This is indicated with the
-    virtual weight sequence numbers 0 and -1 respectively.
-    In other words, if seq_num == 0, then factor is a number of grams;
-    else if seq_num == -1, then factor is a fraction of the total
-    recipe that was eaten.
+    #Calculate the nutrients in a recipe.
+    c = db.cursor()
+    c.execute("""
+    SELECT food_id, amount, seq_num, display_unit
+    FROM ingredients
+    WHERE recipe_id = (?)""", (recipe_id))
 
-    The calculation proceeds by computing the total nutrients in the
-    whole recipe by adding (scaled) nutrient values for all the
-    recipes constituent foods. The total nutrients are then scaled.
-    """
+    total_recipe_nut_fact = Food_nut_fact({})
+    total_recipe_weight = 0
 
-    # Calculate the total nutrients in the recipe.
-    # To do this, look up the recipes constituent foods (and their
-    # amounts) and then use `calculate_nutrients` to get the nutrients
-    # in that amount of the food.
+    for row in c:
+        scaled_gm_w = seq_weight_in_g(row[0], row[2])*row[1]
+        ingredient_nut_fact = \
+        Food_nut_fact(
+            json.loads(
+                calculate_nutrients(
+                    row[0], row[2], row[1])))
+        total_recipe_weight += scaled_gm_w
+        total_recipe_nut_fact += days_nut_facts
 
+    if seq_num == 0: #looking to calculate macros as weight of recipe
+        ratio = factor/total_recipe_weight
+        return total_recipe_nut_fact * ratio
+    else:
+        return total_recipe_nut_fact * factor
     # To calculate the nutrients for a recipe, you crucially need to
     # know the total weight of the recipe.
     # You can adjust `calculate_nutrients` so it returns the
     # total consumed weight of the food as a by-product.
     # This will make calculating the total weight of the recipe easier
     # in here.
-    pass
 
 # test recipe for the function following
 test_recipe = {
-    "name":"food1",
+    "name":"chicken dinner",
     "ingredients":[
         {"food_id":10001,
          "amount":1,
@@ -253,4 +275,5 @@ def weights(food_id):
     return jsonify(get_weights(int(food_id)))
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0")
+    pass
+    #app.run(host="0.0.0.0")
