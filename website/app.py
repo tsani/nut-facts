@@ -122,6 +122,21 @@ def get_weights(food_id):
 # takes the food id, food seq num, and factor
 def calculate_nutrients(food_id, seq_num, factor):
     c = db.cursor()
+    # (food_id, seq_num) identifies a specific number of some unit in the DB.
+    # Note the weight table has an 'amount' column, so when looking
+    # up, divide the gm_weight by the amount to get the true per unit
+    # gram equivalent weight.
+    # That gives the weight of the food consumed, in grams.
+
+    # Next, look up the nutrient values for the food.
+    # Nutrient values are stored per 100g, so to get the nutrient
+    # value for the consumed amount, divide the stored nutrient value
+    # by 100 (to get nutrient value/g) and then multiply by the
+    # consumed food weight to get the consumed nutrient value.
+
+    # Try to use the DB where possible to do the calculation for you.
+
+    # call it scaled_gm_weight
     c.execute("""
     SELECT
     name, units, amount
@@ -138,6 +153,12 @@ def calculate_nutrients(food_id, seq_num, factor):
     # structure of vals: dict of string, tuple (float, string) pairs
     # vals = {'nutrient' : (float amt, 'unit')}
     for row in c:
+        # If all calculated were done in the DB, then no math should
+        # be needed in this loop to build the dict.
+        # Btw look up a tutorial on python dictionary
+        # comprehension. It's like list comprehension but for building
+        # a dictionary. You can probably build the dict in a 1-liner
+        # that way.
         vals[row[0]] = ((row[2]*factor), row[1])
     return vals
 
@@ -154,6 +175,18 @@ def calculate_recipe_nutrients(recipe_id, seq_num, factor):
     whole recipe by adding (scaled) nutrient values for all the
     recipes constituent foods. The total nutrients are then scaled.
     """
+
+    # Calculate the total nutrients in the recipe.
+    # To do this, look up the recipes constituent foods (and their
+    # amounts) and then use `calculate_nutrients` to get the nutrients
+    # in that amount of the food.
+
+    # To calculate the nutrients for a recipe, you crucially need to
+    # know the total weight of the recipe.
+    # You can adjust `calculate_nutrients` so it returns the
+    # total consumed weight of the food as a by-product.
+    # This will make calculating the total weight of the recipe easier
+    # in here.
     pass
 
 # test recipe for the function following
