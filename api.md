@@ -86,3 +86,50 @@ If the request succeeds, return a JSON object like
 ```
 
 which just specifies the ID of the recipe that was created/modified.
+
+`/eat`
+--------
+
+### GET -- retrieves nutrient tracking data
+
+The selected tracking data are summed and returned.
+
+Query string parameters are used to filter the tracking data.
+* `consumer` string: select tracking data for a specific consumer
+* `begin` YYYY-MM-DD date: starting date
+* `end` YYYY-MM-DD date: ending date
+
+**NOTE:** A date like `2020-06-23` refers to 4AM on that day.
+
+The returned data is a JSON object whose keys are nutrient names and whose
+values are tuples (lists). The first tuple component is a number and the second
+is a string that identifies the units for that number.
+
+### POST -- adds a nutrition tracking entry
+
+Example request, for consuming a food directly
+
+```
+{ "consumer": "Jake",
+  "food_id": 10017,
+  "amount": 5,
+  "seq_num": 2
+}
+```
+
+Example request, for consuming a recipe
+```
+{ "consumer": "Eric",
+  "recipe_id": 1,
+  "amount": 0.5,
+  "seq_num": -1
+}
+```
+
+Notice that exactly one of `food_id` or `recipe_id` is present, and this
+determines whether we're consuming a recipe or a food.
+
+**NOTE:** The sequence numbers `0` and `-1` are special since they do not
+correspond to entries in the `weight` table. Instead, the interpretation is a
+number of grams and a total recipe fraction, respectively.
+This means that `-1` is not valid

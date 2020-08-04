@@ -1,9 +1,17 @@
-from flask import Flask, render_template, url_for, request, redirect, flash, session, abort
+from flask import (
+    Flask, send_from_directory, render_template, url_for, request,
+    redirect, flash, session, abort, jsonify
+)
+import requests
 import sqlite3
 import datetime
 import json
+from os import environ
 
-app = Flask(__name__)
+IS_DEV = environ["FLASK_ENV"] == "dev"
+WEBPACK_DEV_SERVER_HOST = "http://localhost:3000"
+
+app = Flask(__name__, static_folder=None if IS_DEV else '/static')
 db = sqlite3.connect('../usda-data/usda.sql3')
 
 class Food_nut_fact:
@@ -27,15 +35,29 @@ class Food_nut_fact:
     def __repr__(self):
         return repr(self.nut_fact)
 
-def main():
-    return
-@app.route('/')
-def index():
-    return render_template("index.html")
+def proxy(host, path):
+    """ Used to proxy a request for a resource to another server. """
+    response = requests.get(f"{host}{path}")
+    excluded_headers = [
+        "content-encoding",
+        "content-length",
+        "transfer-encoding",
+        "connection",
+    ]
+    headers = {
+        name: value
+        for name, value in response.raw.headers.items()
+        if name.lower() not in excluded_headers
+    }
+    return (response.content, response.status_code, headers)
 
-@app.route('/hello')
-def hello():
-    return "ayyyyyyyy"
+# When running in development mode, we set up a reverse proxy into the
+# webpack development server.
+if IS_DEV:
+    @app.route('/', defaults={'path': ''})
+    @app.route('/<path:path>')
+    def catch_all(path):
+        return proxy(WEBPACK_DEV_SERVER_HOST, request.path)
 
 # adds nutrients to someone's daily tally
 def add_macro_traco(consumer, python_nutrients):
@@ -45,7 +67,7 @@ def add_macro_traco(consumer, python_nutrients):
     db.commit()
     db.close()
 
-#this function will sum all the nutrients recorded on a certain day
+# this function will sum all the nutrients recorded on a certain day
 # paramaters: consumer, year, month, day
 def sum_day_macro(consumer, year, month, day):
     date_start = datetime.datetime(year, month, day, 8, 0, 0)
@@ -119,6 +141,21 @@ def calculate_nutrients(food_id, seq_num, factor):
         vals[row[0]] = ((row[2]*factor), row[1])
     return vals
 
+def calculate_recipe_nutrients(recipe_id, seq_num, factor):
+    """Calculate the nutrients in a recipe.
+    The quantity of the recipe consumed is expressed using a number of
+    grams or a total recipe fraction. This is indicated with the
+    virtual weight sequence numbers 0 and -1 respectively.
+    In other words, if seq_num == 0, then factor is a number of grams;
+    else if seq_num == -1, then factor is a fraction of the total
+    recipe that was eaten.
+
+    The calculation proceeds by computing the total nutrients in the
+    whole recipe by adding (scaled) nutrient values for all the
+    recipes constituent foods. The total nutrients are then scaled.
+    """
+    pass
+
 # test recipe for the function following
 test_recipe = {
     "name":"food1",
@@ -147,10 +184,9 @@ def insert_to_db(json_recipe):
     db.commit()
     db.close()
 
-
-def list_foods_recipes(query):
-    query = query[12:]
-    search_terms = query.split("%20")
+def list_foods_recipes(search_terms):
+    """Accepts a list of words that must appear in the long
+    description of the generated results."""
 
     condition_usda = []
     condition_recipe = []
@@ -165,18 +201,23 @@ def list_foods_recipes(query):
 
     conn = sqlite3.connect('../usda-data/usda.sql3')
     c = conn.cursor()
-    c.execute('SELECT id, name FROM recipe WHERE ' + condition_recipe)
+    c.execute('SELECT id, name FROM recipe WHERE ' + condition_recipe + ' LIMIT 100')
     results = {"results":[]}
     for row in c:
         results["results"].append({"recipe_id": row[0], "name":row[1]})
-    c.execute('SELECT id, long_desc FROM food WHERE ' + condition_usda)
+    c.execute('SELECT id, long_desc FROM food WHERE ' + condition_usda + ' LIMIT 100')
     for row in c:
         results["results"].append({"food_id": row[0], "name":row[1]})
     return results
 
+@app.route('/search')
+def search():
+    terms = request.args.get('for').split(' ')
+    return jsonify(list_foods_recipes(terms))
 
-
+@app.route('/food/<food_id>/weights')
+def weights(food_id):
+    return jsonify(get_weights(int(food_id)))
 
 if __name__ == '__main__':
-    main()
-    #app.run(host="0.0.0.0")
+    app.run(host="0.0.0.0")
