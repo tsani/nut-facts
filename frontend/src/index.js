@@ -9,77 +9,92 @@ function makeURL(path, qs) {
     return path
 }
 
-// /* mock data that could be returned from the API */
-// const FAKE_SEARCH_DATA = [
-//   { recipe_id: 1, name: "shake" },
-//   { food_id: 1, name: "pasta" },
-//   { recipe_id: 2, name: "amazing meal 1" },
-//   { food_id: 2, name: "apple" },
-//   { recipe_id: 3, name: "amazing meal 2" },
-// ];
-
-// const FAKE_WEIGHTS = [
-//   { name: "grams", seq_num: 0 },
-//   { name: "1 cup, shredded", seq_num: 1 },
-// ];
-
-// Formats an edible returned from the API into the form we used in
-// the client.
-const formatEdible = (edible) => {
-  return {
-    id: edible.recipe_id || edible.food_id,
-    "type": edible.recipe_id ? "recipe" : "food",
-    value: edible.name
-  };
-};
-
+// The units to use for recipes, since they do not have real units.
 const RECIPE_WEIGHTS = [
   { name: "grams", seq_num: 0 },
   { name: "fraction", seq_num: -1 },
 ];
 
-// const getFakeWeights = (edible) =>
-//   new Promise(
-//     (resolve, reject) => {
-//       if(edible.type === 'recipe')
-//         resolve(RECIPE_WEIGHTS);
-//       else
-//         resolve(FAKE_WEIGHTS);
-//     }
-//   );
-
 function getWeights(edible) {
   if(edible.type === 'recipe')
     return new Promise( (resolve, reject) => resolve(RECIPE_WEIGHTS) );
-  else {
-    let url = makeURL("/food/" + edible.id + "/weights");
-    console.log("requesting weights for edible", edible, 'url:', url);
-    return fetch(url)
+  else
+    return fetch(makeURL("/food/" + edible.id + "/weights"))
       .then(res => res.json())
       .then(data => [ {seq_num: 0, name: 'gram', grams: 1}, ...data.weights ]);
-  }
 }
-
-// // In the fake search, we do the filtering client-side;
-// // In the real search, the filtering happens server-side.
-// function getFakeSearchResults (query) {
-//   const terms = query.split(" ");
-//   const matchesTerms = (edible) =>
-//     terms.every(t => edible.value.includes(t));
-//
-//   return new Promise( (resolve, reject) =>
-//     resolve(FAKE_SEARCH_DATA) )
-//     .then(results =>
-//       results.map(formatEdible).filter(matchesTerms));
-// }
 
 function getSearchResults(terms) {
   if(terms.length >= 3)
     return fetch(makeURL("/search", { "for": terms }))
       .then(res => res.json() )
-      .then(data => data.results.map(formatEdible));
+      .then(data => data.results);
   else
     return new Promise( (resolve, reject) => resolve([]) );
+}
+
+function useNutrients(edible, weight) {
+  const [ nutrients, setNutrients ] = useState({});
+  useEffect(() => {
+    if(!edible || !edible.id || !edible.type || !weight || !weight.amount)
+      return;
+    if(weight.amount <= 0)
+      return;
+
+    fetch(makeURL(
+      '/macros', {
+        id: edible.id,
+        type: edible.type,
+        amount: weight.amount,
+        seq_num: weight.seq_num,
+    }))
+      .then(res => res.json())
+      .then(setNutrients);
+  }, [edible, weight]);
+
+  return nutrients;
+}
+
+const strfdateYYYYMMDD = (date) =>
+  // getMonth is 0-based; what the fuck.
+  `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+
+function useConsumerNutrients(consumer) {
+  const [ nutrients, setNutrients ] = useState({});
+  useEffect(() => {
+    if(!consumer) return;
+    fetch(makeURL(
+      '/eat', {
+        consumer: consumer,
+        date: strfdateYYYYMMDD(new Date())
+    }))
+      .then(res => res.json())
+      .then(setNutrients);
+  }, [consumer]);
+
+  return nutrients;
+}
+
+function useEdibleSearch(searchTerms) {
+  const [edibles, setEdibles] = useState([]);
+
+  useEffect(() => {
+    if(!searchTerms) return;
+    getSearchResults(searchTerms).then(setEdibles);
+  }, [searchTerms]);
+
+  return edibles;
+}
+
+function useEdibleWeights(edible) {
+  const [weights, setWeights] = useState(null);
+
+  useEffect(() => {
+    if(!edible) return;
+    getWeights(edible).then(setWeights)
+  }, [edible]);
+
+  return weights;
 }
 
 // Higher-order component that provides a "loading" behaviour.
@@ -92,6 +107,17 @@ function withLoading(LoadingComponent, LoadedComponent) {
     else
       return <LoadingComponent {...props} />;
   }
+}
+
+const MACRO_KEYS = [ 'Energy', 'Protein', 'Carbohydrate, by difference', 'Total lipid (fat)' ]
+
+// Filters a nutrients object to contain only macronutrients (and energy)
+const onlyMacros = (nutrients) => {
+  let res = {}
+  for (const k of MACRO_KEYS) {
+    res[k] = nutrients[k]
+  }
+  return res
 }
 
 // Basic component that renders its children only when a condition is
@@ -109,19 +135,6 @@ const WeightPicker =
   withLoading(
     Spinner,
     (props) => {
-      // const handleTextChange = (event) => {
-      //   setAmount(event.target.value);
-      //   event.preventDefault();
-      //   props.setAmount({ amount: amount, unit: weightType });
-      // };
-
-      // const handleSelectChange = (event) => {
-      //   setWeightType(props.weights[parseInt(event.target.value)]);
-      //   event.preventDefault();
-      //   props.setAmount({ amount: amount, unit: weightType });
-      // }
-
-
       return (
         <div className="weight-picker">
           <input
@@ -153,31 +166,43 @@ const WeightPicker =
     });
 
 function Edible(props) {
-  return <li onClick={e => props.handleClick(e)}>{props.label}</li>;
+  return <button className="edible" onClick={e => props.handleClick(e)}>{props.label}</button>;
+}
+
+function NutrientDetails(props) {
+  if(!props.nutrients)
+    return null;
+
+  const nonzeroAmount = ([_1, [amount, _2]]) => amount >= 1;
+  const toNiceNutrientName = ([nutrientName, _1]) =>
+    [ nutrientName.split(",")[0], _1 ];
+
+  return (
+    <table className="nutrient-list">
+      <tbody>
+      { Object
+        .entries(props.nutrients)
+        .filter(nonzeroAmount)
+        .map(toNiceNutrientName)
+        .map( ([nutrientName, [amount, unit]]) =>
+          <tr key={nutrientName} className="nutrient-list-item">
+            <td className="nutrient-name"> {nutrientName} </td>
+            <td className="nutrient-amount"> {amount.toFixed(0)} </td>
+            <td className="nutrient-unit"> {unit} </td>
+          </tr>
+      )
+      }
+      </tbody>
+    </table>
+  );
 }
 
 // Component for selecting a food or recipe and then a quantity for it.
 function EdibleSelector(props) {
   const [searchTerms, setSearchTerms] = useState('');
-  const [edibles, setEdibles] = useState([]);
-  const [weights, setWeights] = useState(null);
-
-  useEffect(() => {
-    if(searchTerms && null === props.eaten.edible) {
-      getSearchResults(searchTerms)
-      .then(setEdibles)
-    }
-  }, [searchTerms, props.eaten]);
-
-  useEffect(() => {
-    if(null !== props.eaten.edible) {
-      getWeights(props.eaten.edible)
-        .then(ws => {
-          console.log("got weights", ws);
-          setWeights(ws);
-        })
-    }
-  }, [props.eaten.edible]);
+  const edibles = useEdibleSearch(searchTerms);
+  const weights = useEdibleWeights(props.eaten.edible);
+  const nutrients = useNutrients(props.eaten.edible, props.eaten.weight);
 
   if(null === props.eaten.edible) {
     return (
@@ -190,17 +215,19 @@ function EdibleSelector(props) {
             onChange={e => setSearchTerms(e.target.value)}
             value={searchTerms}
           />
-          <ul>
+          <div
+            className={`dropdown-values ${!edibles.length ? 'dropdown-values-empty' : ''} `}
+          >
             {edibles.map(edible =>
               <Edible
                 key={`${edible.type}-${edible.id}`}
-                label={edible.value}
+                label={edible.name}
                 handleClick={() =>
                   props.handleEatenChange({edible: edible})
                 }
               />)
             }
-          </ul>
+          </div>
         </div>
       </div>
     );
@@ -214,7 +241,7 @@ function EdibleSelector(props) {
             onClick={() => props.handleEatenChange({edible: null})}>
             X
           </span>
-          {props.eaten.edible.value}
+          {props.eaten.edible.name}
         </div>
         <WeightPicker
           edibleId={props.eaten.edible.id}
@@ -225,6 +252,7 @@ function EdibleSelector(props) {
           weights={weights}
           ready={weights}
         />
+        <NutrientDetails nutrients={nutrients} />
       </div>
     );
   }
@@ -232,7 +260,7 @@ function EdibleSelector(props) {
 
 function EatSomething(props) {
   return (
-    <div>
+    <form onSubmit={props.handleSubmit}>
       <EdibleSelector
         eaten={props.eaten}
         handleEatenChange={props.handleEatenChange}
@@ -255,16 +283,9 @@ function EatSomething(props) {
         </label>
       </EnableIf>
       <EnableIf condition={props.eaten.consumer}>
-        <div>
-          <button
-            type="submit"
-            onClick={props.handleSubmit}
-          >
-            I ate it!
-          </button>
-        </div>
+        <div><input type="submit" value="I ate it!" /></div>
       </EnableIf>
-    </div>
+    </form>
   );
 }
 
@@ -274,14 +295,34 @@ function exFetch(setStatus, ...rest) {
   setStatus(true);
   return fetch(...rest)
     .then(
-      res => {
-        setStatus(false);
-        return res;
-      },
-      e => {
-        setStatus(false);
-        throw e;
-    });
+      res => { setStatus(false); return res; },
+      e => { setStatus(false); throw e; }
+    );
+}
+
+function PersonalDayMacros(props) {
+  const nutrients = useConsumerNutrients(props.consumer);
+  console.log('consumer nutrients', props.consumer, nutrients);
+  if(Object.keys(nutrients).length)
+    return (
+      <div className="personal-day-macros">
+        <p>{props.consumer}</p>
+        <NutrientDetails nutrients={onlyMacros(nutrients)}/>
+      </div>
+    )
+  else
+    return null;
+}
+
+function DayMacros(props) {
+  return (
+    <div className="day-macros">
+      { props.consumers.map(
+          consumer =>
+            <PersonalDayMacros consumer={consumer} />)
+      }
+    </div>
+  );
 }
 
 function MacroTraco(props) {
@@ -289,12 +330,9 @@ function MacroTraco(props) {
   const [ eaten, setEaten ] = useState({...INITIAL_EATEN});
   const [ submitting, setSubmitting ] = useState(false);
   const [ error, setError ] = useState(false);
+  const [ counter, setCounter ] = useState(0);
 
-  const handleEatenChange = (e) => {
-    // let newEaten = {...eaten, ...e}
-    // console.log("Now eaten is", newEaten);
-    setEaten({...eaten, ...e});
-  };
+  const handleEatenChange = (e) => setEaten({...eaten, ...e});
 
   const handleSubmit = () => {
     exFetch(setSubmitting, '/eat', {
@@ -302,19 +340,24 @@ function MacroTraco(props) {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(eaten)
     })
-      .then(res => {
-        setSubmitting(false);
-        setError(!res.ok);
-        if(res.ok)
-          setEaten({...INITIAL_EATEN});
-      })
-      .catch(e => { setError(true); throw e; });
+      .then(
+        res => {
+          setSubmitting(false);
+          setError(!res.ok);
+          if(res.ok) {
+            setEaten({...INITIAL_EATEN});
+            setCounter(x => x+1);
+          }
+        },
+        e => { setError(true); throw e; }
+      );
   };
 
   if(!submitting) {
     return (
       <div>
         <h1>Macro-Micro-Tracko</h1>
+        <DayMacros counter={counter} consumers={['jake', 'eric']}/>
         <div>
           <h2> Eat something? </h2>
           <EnableIf condition={error}>

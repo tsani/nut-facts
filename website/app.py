@@ -4,7 +4,7 @@ from flask import (
 )
 import requests
 import sqlite3
-import datetime
+from datetime import datetime, timedelta
 import json
 import sys
 from os import environ
@@ -34,6 +34,9 @@ class Food_nut_fact:
     def __init__(self, nut_facts):
         self.nut_fact = nut_facts
 
+    def to_dict(self):
+        return self.nut_fact.copy()
+
     def __add__(self, other):
         total = self.nut_fact.copy()
         for key in other.nut_fact:
@@ -56,8 +59,6 @@ class Food_nut_fact:
             value, unit = self.nut_fact[key]
             new_dic[key] = value * multiplicand, unit
         return Food_nut_fact(new_dic)
-
-
 
 def proxy(host, path):
     """ Used to proxy a request for a resource to another server. """
@@ -93,9 +94,9 @@ def add_macro_traco(consumer, python_nutrients):
 
 # this function will sum all the nutrients recorded on a certain day
 # paramaters: consumer, year, month, day
-def sum_day_macro(consumer, year, month, day):
-    date_start = datetime.datetime(year, month, day, 8, 0, 0)
-    date_end = date_start + datetime.timedelta(days=1)
+def sum_day_macro(consumer, date_start):
+    date_start = date_start.replace(hour=0, minute=0, second=0)
+    date_end = date_start + timedelta(days=1)
     db = sqlite3.connect('../usda-data/usda.sql3')
     c = db.cursor()
     c.execute("""
@@ -103,15 +104,17 @@ def sum_day_macro(consumer, year, month, day):
     FROM macro_traco
     WHERE timestamp BETWEEN (?) AND (?) AND consumer=(?)
     """, (date_start, date_end, consumer))
-    print(c)
+
+    print('getting day macros for', consumer, 'between', date_start, 'and', date_end)
+
     # structure of vals: dict of string, tuple (float, string) pairs
     # vals = {'nutrient' : (float amt, 'unit')}
     total_day_nut_fact = Food_nut_fact({})
 
     for row in c:
-        print(json.loads(row[0]))
         days_nut_facts = Food_nut_fact(json.loads(row[0]))
         total_day_nut_fact += days_nut_facts
+
     return total_day_nut_fact
 
 def get_weights(food_id):
@@ -133,7 +136,6 @@ def get_weights(food_id):
         unit_data["grams"] = row[1]
         total.append(unit_data)
     return {"weights":total}
-
 
 # returns the nutrient info of a food
 # takes the food id, food seq num, and factor
@@ -257,9 +259,13 @@ def insert_to_db(json_recipe):
     c.commit()
     c.close()
 
-def list_foods_recipes(search_terms):
+def list_foods_recipes(search_terms, restrict_to=None):
     """Accepts a list of words that must appear in the long
     description of the generated results."""
+    if restrict_to is None:
+        restrict_to = ['food', 'recipe']
+    else:
+        restrict_to = [restrict_to]
 
     condition_usda = []
     condition_recipe = []
@@ -274,45 +280,99 @@ def list_foods_recipes(search_terms):
 
     conn = sqlite3.connect('../usda-data/usda.sql3')
     c = conn.cursor()
-    c.execute('SELECT id, name FROM recipe WHERE ' + condition_recipe + ' LIMIT 100')
-    results = {"results":[]}
-    for row in c:
-        results["results"].append({"recipe_id": row[0], "name":row[1]})
-    c.execute('SELECT id, long_desc FROM food WHERE ' + condition_usda + ' LIMIT 100')
-    for row in c:
-        results["results"].append({"food_id": row[0], "name":row[1]})
-    return results
+    results = []
+    if 'recipe' in restrict_to:
+        c.execute('SELECT id, name FROM recipe WHERE ' + condition_recipe + ' LIMIT 100')
+        results.extend(
+            {"id": row[0], "type": "recipe", "name":row[1]} for row in c
+        )
+    if 'food' in restrict_to:
+        c.execute('SELECT id, long_desc FROM food WHERE ' + condition_usda + ' LIMIT 100')
+        results.extend(
+            {"id": row[0], "type": "food", "name":row[1]} for row in c
+        )
+    return {'results': results}
 
 @app.route('/search')
 def search():
-    terms = request.args.get('for').split(' ')
-    return jsonify(list_foods_recipes(terms))
+    search_for = request.args.get('for')
+    if search_for is None:
+        return jsonify({'message': 'missing query string parameter "for"'}), 400
+
+    results = list_foods_recipes(
+        search_for.split(' '),
+        restrict_to=request.args.get('restrict_to')
+    )
+
+    return jsonify(results)
 
 @app.route('/food/<food_id>/weights')
 def weights(food_id):
     return jsonify(get_weights(int(food_id)))
 
-@app.route('/eat', methods=['POST'])
+def calculate_edible_nutrients(edible, weight):
+    """Calculates nutrients for a given quantity of an edible (either
+    a recipe or a food)."""
+    f = None
+    if(edible['type'] == 'food'):
+        f = calculate_nutrients
+    else:
+        assert edible['type'] == 'recipe'
+        f = calculate_recipe_nutrients
+
+    return f(
+        int(edible['id']),
+        int(weight['seq_num']),
+        float(weight['amount'])
+    )
+
+@app.route('/eat', methods=['GET', 'POST'])
 def eat():
+    if request.method == 'POST':
+        return eat_post()
+    else:
+        assert request.method == 'GET'
+        return eat_get()
+
+def eat_get():
+    consumer = request.args['consumer']
+    date_string = request.args['date'] # YYYY-MM-DD
+    date = datetime.strptime(date_string, '%Y-%m-%d')
+    return jsonify(sum_day_macro(consumer, date).to_dict())
+
+def eat_post():
     # keys: edible, weight, consumer (string)
     # edible keys: type ('food' or 'recipe'), id
     # weight keys: seq_num, amount
     eaten = request.json
-    f = None
-    if(eaten['edible']['type'] == 'food'):
-        f = calculate_nutrients
-    else:
-        assert eaten['edible']['type'] == 'recipe'
-        f = calculate_recipe_nutrients
+    assert eaten is not None
 
-    nut = f(
-        int(eaten['edible']['id']),
-        int(eaten['weight']['seq_num']),
-        float(eaten['weight']['amount'])
+    nut = calculate_edible_nutrients(
+        eaten['edible'],
+        eaten['weight']
     )
 
-    add_macro_traco(eaten['consumer'], nut)
+    add_macro_traco(eaten['consumer'].lower(), nut)
     return jsonify({})
+
+@app.route('/macros')
+def macros():
+    """Calculates the macros for a given quantity of an edible.
+    """
+    edible = {
+        'id': request.args.get('id'),
+        'type': request.args.get('type'),
+    }
+    weight = {
+        'seq_num': request.args.get('seq_num'),
+        'amount': request.args.get('amount'),
+    }
+    return jsonify(
+        calculate_edible_nutrients(
+            edible,
+            weight,
+        )
+    )
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'test':

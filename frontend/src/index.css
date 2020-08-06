@@ -21,15 +21,34 @@ div.dropdown > ul {
     width: 100%;
 }
 
-div.dropdown > ul > li {
+div.dropdown .edible {
+    width: 100%;
     padding: 0.5ex;
-    list-style-type: none;
     margin: 0;
-    border: 2px solid black;
+    text-decoration: none;
+    color: inherit;
+    background-color: inherit;
+    display: block;
+    text-align: left;
+    border: none;
 }
 
-div.dropdown > ul > li:hover {
+div.dropdown-values-empty {
+    display: none;
+}
+
+div.dropdown-values {
+    border: 2px solid #ccc;
+    padding: 0.5ex;
+    border-radius: 5px;
+    overflow-y: auto;
+    max-height: 50vh;
+}
+
+div.dropdown .edible:hover {
     background-color: #4af;
+    border: none;
+    border-radius: 2px;
     cursor: pointer;
 }
 
@@ -71,4 +90,13 @@ div.selected-edible .cancel-edible-selection {
 
 div.weight-picker {
     margin: 1em 0;
+}
+
+div.nutrient-list-item > * {
+    margin: 0.5ex 0.5ex;
+}
+
+div.day-macros {
+    display: flex;
+    flex-flow: row wrap;
 }

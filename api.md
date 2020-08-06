@@ -25,31 +25,29 @@ The `seq_num` uniquely identifies this quantity type for the `food_id`.
 ---------
 
 ### GET -- lists foods and recipes
-# done (create recipe ONLY) see `list_foods_recipes`
+(See `list_foods_recipes`)
 
+Query string parameters:
+* `for`: specify search terms, space separated words
+* `restrict_to` optional: either `food` or `recipe` and only returns those types
+  of results.
 
-Uses a query string parameter to specify search terms, e.g.
-
+e.g.
 `/search?for=beef%20raw%20lean`
 
-Search terms are separated by spaces (`%20` in the URL).
-
-Should return a JSON object like
-
+Returns:
 ```
 { "results": [ <list of result objects> ] }
 ```
 
-and each 'result object' is either
-
+and each `result object` is
 ```
-{ "recipe_id": 1, "name": "full name of recipe" }
+{ "type": <"food" or "recipe">, "id": <int>, "name": <string> }
 ```
-in case of a recipe, or
+e.g.
 ```
-{ "food_id": 10017, "name": "full name of the food" }
+{ "type": "recipe", "id": 2, "name": "delicious pasta salad" }
 ```
-in case of a food.
 
 `/recipes`
 ----------
@@ -96,8 +94,7 @@ The selected tracking data are summed and returned.
 
 Query string parameters are used to filter the tracking data.
 * `consumer` string: select tracking data for a specific consumer
-* `begin` YYYY-MM-DD date: starting date
-* `end` YYYY-MM-DD date: ending date
+* `date` YYYY-MM-DD date: date to select from.
 
 **NOTE:** A date like `2020-06-23` refers to 4AM on that day.
 
@@ -145,3 +142,14 @@ correspond to entries in the `weight` table. Instead, the interpretation is a
 number of grams and a total recipe fraction, respectively.
 This means that `-1` is not valid as `seq_num` for a food, but instead valid
 only for recipes.
+
+`/macros`
+---------
+
+### GET -- calculate macros for a given quantity of an edible
+
+Query string parameters:
+* `id`: identifies the edible
+* `type`: `"recipe"` or `"food"`, identifies the type of edible
+* `seq_num`: identifies the unit of measurement used
+* `amount`: identifies the
