@@ -2,6 +2,15 @@ import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import './index.css';
 
+Array.changing = (array, i, valueOrFunction) => {
+  const copy = [...array]
+  if(typeof valueOrFunction === 'function')
+    copy[i] = valueOrFunction(copy[i]);
+  else
+    copy[i] = valueOrFunction;
+  return copy;
+};
+
 function makeURL(path, qs) {
   if(qs)
     return path + '?' + new URLSearchParams(qs).toString();
@@ -15,6 +24,12 @@ const RECIPE_WEIGHTS = [
   { name: "fraction", seq_num: -1 },
 ];
 
+const INITIAL_EATEN = {
+  edible: null,
+  weight: {amount: '', seq_num: 0},
+ // consumer: ''
+};
+
 function getWeights(edible) {
   if(edible.type === 'recipe')
     return new Promise( (resolve, reject) => resolve(RECIPE_WEIGHTS) );
@@ -24,9 +39,9 @@ function getWeights(edible) {
       .then(data => [ {seq_num: 0, name: 'gram', grams: 1}, ...data.weights ]);
 }
 
-function getSearchResults(terms) {
+function getSearchResults(terms, restrictTo) {
   if(terms.length >= 3)
-    return fetch(makeURL("/search", { "for": terms }))
+    return fetch(makeURL("/search", { "for": terms, restrictTo: restrictTo }))
       .then(res => res.json() )
       .then(data => data.results);
   else
@@ -75,13 +90,13 @@ function useConsumerNutrients(consumer) {
   return nutrients;
 }
 
-function useEdibleSearch(searchTerms) {
+function useEdibleSearch(searchTerms, restrictTo) {
   const [edibles, setEdibles] = useState([]);
 
   useEffect(() => {
     if(!searchTerms) return;
-    getSearchResults(searchTerms).then(setEdibles);
-  }, [searchTerms]);
+    getSearchResults(searchTerms, restrictTo).then(setEdibles);
+  }, [searchTerms, restrictTo]);
 
   return edibles;
 }
@@ -135,18 +150,23 @@ const WeightPicker =
   withLoading(
     Spinner,
     (props) => {
+      const handleFocus = props.handleFocus;
       return (
         <div className="weight-picker">
           <input
             type="text"
             name="amount"
-            value={props.weight.amount}
+            onFocus={() => handleFocus(true)}
+            onBlur={() => handleFocus(false)}
+            value={props.weight && props.weight.amount}
             onChange={event =>
               props.handleChange({[event.target.name]: event.target.value})
             }
           />
           <select
             name="seq_num"
+            onFocus={() => handleFocus(true)}
+            onBlur={() => handleFocus(false)}
             onChange={e =>
               props.handleChange({[e.target.name]: parseInt(e.target.value)})
             }
@@ -156,6 +176,8 @@ const WeightPicker =
                 name="seq_num"
                 key={`${props.edibleId}-${unit.seq_num}`}
                 value={unit.seq_num}
+                onFocus={() => handleFocus(true)}
+                onBlur={() => handleFocus(false)}
               >
                 {unit.name}
               </option>)
@@ -197,39 +219,56 @@ function NutrientDetails(props) {
   );
 }
 
-// Component for selecting a food or recipe and then a quantity for it.
+// required props:
+// - handleEdibleChange: function that receives the edible whenever it
+//   is selected by the user
 function EdibleSelector(props) {
   const [searchTerms, setSearchTerms] = useState('');
-  const edibles = useEdibleSearch(searchTerms);
+  const edibles = useEdibleSearch(searchTerms, props.restrictTo);
+
+  return (
+    <div className="edible-selector">
+      <div className="dropdown">
+        <input
+          autoFocus
+          type="text"
+          placeholder="Type to find a food or recipe..."
+          onChange={e => setSearchTerms(e.target.value)}
+          value={searchTerms}
+        />
+        <div
+          className={`dropdown-values ${!edibles.length ? 'dropdown-values-empty' : ''} `}
+        >
+          {edibles.map(edible =>
+            <Edible
+              key={`${edible.type}-${edible.id}`}
+              label={edible.name}
+              handleClick={() =>
+                props.handleEdibleChange(edible)
+              }
+            />)
+          }
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Component for selecting a food or recipe and then a quantity for it.
+// required props:
+// - eaten, with keys 'edible' and 'weight'
+function WeightedEdibleSelector(props) {
   const weights = useEdibleWeights(props.eaten.edible);
   const nutrients = useNutrients(props.eaten.edible, props.eaten.weight);
+  const [ weightFocused, setWeightFocused ] = useState(false);
 
   if(null === props.eaten.edible) {
     return (
-      <div className="edible-selector">
-        <div className="dropdown">
-          <input
-            autoFocus
-            type="text"
-            placeholder="Type to find a food or recipe..."
-            onChange={e => setSearchTerms(e.target.value)}
-            value={searchTerms}
-          />
-          <div
-            className={`dropdown-values ${!edibles.length ? 'dropdown-values-empty' : ''} `}
-          >
-            {edibles.map(edible =>
-              <Edible
-                key={`${edible.type}-${edible.id}`}
-                label={edible.name}
-                handleClick={() =>
-                  props.handleEatenChange({edible: edible})
-                }
-              />)
-            }
-          </div>
-        </div>
-      </div>
+      <EdibleSelector
+        handleEdibleChange={(edible) =>
+          props.handleEatenChange({edible: edible})
+        }
+      />
     );
   }
   else {
@@ -249,10 +288,13 @@ function EdibleSelector(props) {
           handleChange={weight =>
             props.handleEatenChange({weight: {...props.eaten.weight, ...weight}})
           }
+          handleFocus={setWeightFocused}
           weights={weights}
           ready={weights}
         />
-        <NutrientDetails nutrients={nutrients} />
+        <EnableIf condition={weightFocused}>
+          <NutrientDetails nutrients={nutrients} />
+        </EnableIf>
       </div>
     );
   }
@@ -261,7 +303,7 @@ function EdibleSelector(props) {
 function EatSomething(props) {
   return (
     <form onSubmit={props.handleSubmit}>
-      <EdibleSelector
+      <WeightedEdibleSelector
         eaten={props.eaten}
         handleEatenChange={props.handleEatenChange}
       />
@@ -282,7 +324,7 @@ function EatSomething(props) {
           />
         </label>
       </EnableIf>
-      <EnableIf condition={props.eaten.consumer}>
+      <EnableIf condition={props.eaten.edible && props.eaten.consumer}>
         <div><input type="submit" value="I ate it!" /></div>
       </EnableIf>
     </form>
@@ -302,14 +344,13 @@ function exFetch(setStatus, ...rest) {
 
 function PersonalDayMacros(props) {
   const nutrients = useConsumerNutrients(props.consumer);
-  console.log('consumer nutrients', props.consumer, nutrients);
   if(Object.keys(nutrients).length)
     return (
       <div className="personal-day-macros">
         <p>{props.consumer}</p>
         <NutrientDetails nutrients={onlyMacros(nutrients)}/>
       </div>
-    )
+    );
   else
     return null;
 }
@@ -319,14 +360,13 @@ function DayMacros(props) {
     <div className="day-macros">
       { props.consumers.map(
           consumer =>
-            <PersonalDayMacros consumer={consumer} />)
+            <PersonalDayMacros key={consumer} consumer={consumer} />)
       }
     </div>
   );
 }
 
 function MacroTraco(props) {
-  const INITIAL_EATEN = {edible: null, weight: {amount: '', seq_num: 0}, consumer: ''};
   const [ eaten, setEaten ] = useState({...INITIAL_EATEN});
   const [ submitting, setSubmitting ] = useState(false);
   const [ error, setError ] = useState(false);
@@ -357,7 +397,7 @@ function MacroTraco(props) {
     return (
       <div>
         <h1>Macro-Micro-Tracko</h1>
-        <DayMacros counter={counter} consumers={['jake', 'eric']}/>
+        <DayMacros counter={counter} consumers={['jake', 'eric', 'test']}/>
         <div>
           <h2> Eat something? </h2>
           <EnableIf condition={error}>
@@ -377,8 +417,121 @@ function MacroTraco(props) {
   }
 }
 
+function DynamicWeightedFoodList(props) {
+  const addNewFood = () =>
+    props.setFoods(foods => [ ...foods, {...INITIAL_EATEN} ]);
+
+  const handleEatenChange = (newEaten, i) => {
+    props.setFoods(foods => {
+      let newFoods = Array.changing(
+        foods, i, oldEaten => {
+          return { ...oldEaten, ...newEaten };
+        }
+      )
+      console.log('new foods', newFoods);
+      return newFoods;
+    });
+  }
+
+  return (
+    <div className="weighted-foods-list">
+      { props.foods.map((weightedFood, i) =>
+        <div key={i} className="weighted-foods-list-item">
+          <h4>Ingredient #{i+1}</h4>
+          <WeightedEdibleSelector
+            eaten={weightedFood}
+            handleEatenChange={eaten => handleEatenChange(eaten, i)}
+          />
+        </div>
+      )}
+      <div>
+        <button type="button" onClick={addNewFood}>
+          Add another ingredient
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// A recipe is a list of foods + weights
+function RecipeEditor(props) {
+  const [ recipeIsSelected, setRecipeIsSelected ] = useState(false);
+  // foods: array of objects with keys 'edible' and 'weight'
+  // the edibles must all be foods (no recipes allowed within a recipe)
+  // weight is a weight object with keys 'seq_num' and 'amount'
+  const [ foods, setFoods ] = useState([]);
+  const [ isNewRecipe, setIsNewRecipe ] = useState(true);
+  const [ newRecipeName, setNewRecipeName ] = useState('');
+  const [ submitting, setSubmitting ] = useState(false);
+  const [ error, setError ] = useState(false);
+
+  const handleIsNewRecipeChange = (e) => setIsNewRecipe(e.target.checked);
+  const handleNewRecipeNameChange = (e) => setNewRecipeName(e.target.value);
+
+  const handleSubmit = () => {
+    exFetch(setSubmitting, '/recipes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: newRecipeName,
+        ingredients: foods,
+      })
+    })
+      .then(res => {
+        setError(!res.ok);
+        if(!res.ok) return;
+        setFoods([]);
+      });
+  };
+
+  return (
+    <div className="recipe-editor">
+      <h2>Add or edit recipe</h2>
+      <EnableIf condition={error}>
+        <p> Oops, something went wrong. </p>
+      </EnableIf>
+      <form action="javascript:void(0);" onSubmit={handleSubmit}>
+        <label htmlFor="is-new-recipe">
+          New recipe?&nbsp;
+          <input
+            type="checkbox"
+            id="is-new-recipe"
+            name="is-new-recipe"
+            checked={isNewRecipe}
+            onChange={handleIsNewRecipeChange}
+          />
+        </label>
+
+        <EnableIf condition={isNewRecipe}>
+          <input
+            type="text"
+            value={newRecipeName}
+            onChange={handleNewRecipeNameChange}
+            placeholder="Recipe name"
+          />
+        </EnableIf>
+        <EnableIf condition={!isNewRecipe}>
+          <EdibleSelector restrictTo="recipe"/>
+        </EnableIf>
+
+        <DynamicWeightedFoodList
+          foods={foods}
+          setFoods={setFoods}
+        />
+
+        <input type="submit" value="Add this recipe" />
+      </form>
+    </div>
+  );
+}
+
 function App(props) {
-  return <MacroTraco/>
+  return (
+    <>
+    <MacroTraco/>
+    <RecipeEditor/>
+    </>
+  );
 }
 
 ReactDOM.render(

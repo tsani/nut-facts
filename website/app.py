@@ -41,7 +41,8 @@ class Food_nut_fact:
         total = self.nut_fact.copy()
         for key in other.nut_fact:
             if key in self.nut_fact:
-                total[key][0] = other[key][0] + self[key][0]
+                assert self[key][1] == other[key][1]
+                total[key] = (other[key][0] + self[key][0], other[key][1])
             else:
                 total[key] = other[key]
         return Food_nut_fact(total)
@@ -86,11 +87,17 @@ if IS_DEV:
 
 # adds nutrients to someone's daily tally
 def add_macro_traco(consumer, python_nutrients):
+    """Adds a Food_nut_fact to a consumer's eaten foods for today."""
     db = get_db()
     print("inserting into marco_traco table")
-    db.execute("INSERT INTO macro_traco (consumer, nutrients_json) VALUES (?, ?)", (consumer, json.dumps(python_nutrients)))
+    db.execute(
+        "INSERT INTO macro_traco "
+        "(consumer, nutrients_json) VALUES (?, ?)",
+        ( consumer,
+          json.dumps(python_nutrients.nut_fact),
+        )
+    )
     db.commit()
-    db.close()
 
 # this function will sum all the nutrients recorded on a certain day
 # paramaters: consumer, year, month, day
@@ -104,8 +111,6 @@ def sum_day_macro(consumer, date_start):
     FROM macro_traco
     WHERE timestamp BETWEEN (?) AND (?) AND consumer=(?)
     """, (date_start, date_end, consumer))
-
-    print('getting day macros for', consumer, 'between', date_start, 'and', date_end)
 
     # structure of vals: dict of string, tuple (float, string) pairs
     # vals = {'nutrient' : (float amt, 'unit')}
@@ -127,7 +132,6 @@ def get_weights(food_id):
     weight
     WHERE
     food_id = (?)""", (food_id,))
-    print(c)
     total = []
     for row in c:
         unit_data = {}
@@ -140,7 +144,6 @@ def get_weights(food_id):
 # returns the nutrient info of a food
 # takes the food id, food seq num, and factor
 def calculate_nutrients(food_id, seq_num, factor):
-    print('factor', factor)
     db = get_db()
     c = db.cursor()
     # (food_id, seq_num) identifies a specific number of some unit in the DB.
@@ -155,8 +158,8 @@ def calculate_nutrients(food_id, seq_num, factor):
         scaled_gm_w = 1
 
     else:
-        print("sent invalid seq_num!" + str(seq_num))
-        raise
+        raise None
+
     # Next, look up the nutrient values for the food.
     # Nutrient values are stored per 100g, so to get the nutrient
     # value for the consumed amount, divide the stored nutrient value
@@ -178,7 +181,7 @@ def calculate_nutrients(food_id, seq_num, factor):
     # }
 
     c.close();
-    return vals
+    return Food_nut_fact(vals)
 
 def seq_weight_in_g(food_id, seq_num):
     #gets food id and its seq num
@@ -201,8 +204,8 @@ def calculate_recipe_nutrients(recipe_id, seq_num, factor):
     c = db.cursor()
     c.execute("""
     SELECT food_id, amount, seq_num, display_unit
-    FROM ingredients
-    WHERE recipe_id = (?)""", (recipe_id))
+    FROM ingredient
+    WHERE recipe_id = (?)""", (recipe_id,))
 
     total_recipe_nut_fact = Food_nut_fact({})
     total_recipe_weight = 0
@@ -210,12 +213,13 @@ def calculate_recipe_nutrients(recipe_id, seq_num, factor):
     for row in c:
         scaled_gm_w = seq_weight_in_g(row[0], row[2])*row[1]
         ingredient_nut_fact = \
-        Food_nut_fact(
-            json.loads(
-                calculate_nutrients(
-                    row[0], row[2], row[1])))
+            calculate_nutrients(
+                row[0], row[2], row[1])
+        if ingredient_nut_fact is None:
+            return None # invalid food was given
+
         total_recipe_weight += scaled_gm_w
-        total_recipe_nut_fact += days_nut_facts
+        total_recipe_nut_fact += ingredient_nut_fact
 
     if seq_num == 0: #looking to calculate macros as weight of recipe
         ratio = factor/total_recipe_weight
@@ -244,19 +248,31 @@ test_recipe = {
          "display_unit":"cup"
          }]
     }
+
 # inserts a new json recipe into the DB, including ingredients
-def insert_to_db(json_recipe):
-    recipe_name = json_recipe["name"]
+def add_recipe(recipe):
+    recipe_name = recipe["name"]
     db = get_db()
     c = db.cursor()
+    c.execute("BEGIN")
     c.execute("INSERT INTO recipe (name) VALUES (?)", (recipe_name,))
-    for x in c.execute("SELECT id FROM recipe WHERE name=(?)", (recipe_name,)):
-        recipe_id = x[0]
-    for ingredient in json_recipe["ingredients"]:
+    recipe_id = c.lastrowid
+
+    for ingredient in recipe["ingredients"]:
+        assert ingredient['edible']['type'] == 'food'
         c.execute(
-            "INSERT INTO ingredient (recipe_id, food_id, amount, seq_num, display_unit) VALUES (?,?,?,?,?)",
-            (recipe_id, ingredient["food_id"], ingredient["amount"], ingredient["seq_num"], ingredient["display_unit"],))
-    c.commit()
+            "INSERT INTO ingredient "
+            "(recipe_id, food_id, amount, seq_num, display_unit) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ( recipe_id,
+              ingredient['edible']["id"],
+              ingredient['weight']["amount"],
+              ingredient['weight']["seq_num"],
+              ''
+            )
+        )
+
+    db.commit()
     c.close()
 
 def list_foods_recipes(search_terms, restrict_to=None):
@@ -312,7 +328,9 @@ def weights(food_id):
 
 def calculate_edible_nutrients(edible, weight):
     """Calculates nutrients for a given quantity of an edible (either
-    a recipe or a food)."""
+    a recipe or a food).
+    Returns a Foot_nut_fact.
+    """
     f = None
     if(edible['type'] == 'food'):
         f = calculate_nutrients
@@ -320,11 +338,13 @@ def calculate_edible_nutrients(edible, weight):
         assert edible['type'] == 'recipe'
         f = calculate_recipe_nutrients
 
-    return f(
+    d = f(
         int(edible['id']),
         int(weight['seq_num']),
         float(weight['amount'])
     )
+    assert type(d) == Food_nut_fact
+    return d
 
 @app.route('/eat', methods=['GET', 'POST'])
 def eat():
@@ -351,8 +371,11 @@ def eat_post():
         eaten['edible'],
         eaten['weight']
     )
+    if nut is None:
+        return jsonify({'message': 'invalid edible'}), 400
 
-    add_macro_traco(eaten['consumer'].lower(), nut)
+    for consumer in eaten['consumer'].lower().split(' '):
+        add_macro_traco(consumer, nut)
     return jsonify({})
 
 @app.route('/macros')
@@ -371,8 +394,15 @@ def macros():
         calculate_edible_nutrients(
             edible,
             weight,
-        )
+        ).nut_fact
     )
+
+@app.route('/recipes', methods=['POST'])
+def recipes():
+    recipe = request.json
+    assert recipe is not None
+    add_recipe(recipe)
+    return jsonify({})
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'test':
