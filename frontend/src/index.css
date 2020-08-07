@@ -14,14 +14,7 @@ div.dropdown > input[type="text"] {
     width: 100%;
 }
 
-div.dropdown > ul {
-    padding: 0;
-    margin: 0;
-    /* position: relative;*/
-    width: 100%;
-}
-
-div.dropdown .edible {
+div.dropdown-values > * {
     width: 100%;
     padding: 0.5ex;
     margin: 0;

@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import './index.css';
 
+const strfdateYYYYMMDD = (date) =>
+  // getMonth is 0-based; what the fuck.
+  `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+
 Array.changing = (array, i, valueOrFunction) => {
   const copy = [...array]
   if(typeof valueOrFunction === 'function')
@@ -69,10 +73,6 @@ function useNutrients(edible, weight) {
 
   return nutrients;
 }
-
-const strfdateYYYYMMDD = (date) =>
-  // getMonth is 0-based; what the fuck.
-  `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
 
 function useConsumerNutrients(consumer) {
   const [ nutrients, setNutrients ] = useState({});
@@ -187,9 +187,14 @@ const WeightPicker =
       );
     });
 
-function Edible(props) {
-  return <button className="edible" onClick={e => props.handleClick(e)}>{props.label}</button>;
-}
+const Edible = (props) =>
+    <button
+      type="button"
+      className="edible"
+      onClick={e => props.handleClick(e)}
+    >
+      {props.label}
+    </button>;
 
 function NutrientDetails(props) {
   if(!props.nutrients)
@@ -219,40 +224,81 @@ function NutrientDetails(props) {
   );
 }
 
-// required props:
-// - handleEdibleChange: function that receives the edible whenever it
-//   is selected by the user
-function EdibleSelector(props) {
-  const [searchTerms, setSearchTerms] = useState('');
-  const edibles = useEdibleSearch(searchTerms, props.restrictTo);
+function useNutrientSearch(searchTerms) {
+  const [ nutrients, setNutrients ] = useState([]);
+  useEffect(() =>
+    fetch(makeURL('/nutrients', { search: searchTerms }))
+      .then(res => res.json())
+      .then(setNutrients),
+            [searchTerms]);
+  return nutrients;
+}
 
-  return (
-    <div className="edible-selector">
-      <div className="dropdown">
-        <input
-          autoFocus
-          type="text"
-          placeholder="Type to find a food or recipe..."
-          onChange={e => setSearchTerms(e.target.value)}
-          value={searchTerms}
-        />
+const NutrientSelector = dynamicSelector({
+  useResults: useNutrientSearch,
+  placeholder: "Type the name of a nutrient",
+  formatResult: (nutrient) =>
+    <button data-nutrient-id={nutrient.id} type="button">
+      {nutrient.name}
+    </button>
+});
+
+// generates a _dynamic selector_, which is a text field that obtains
+// a list of options from a data source.
+// options:
+// - useResults (function)
+//   1. search terms (a string) and generates the list of choices
+//   2. the whole props dictionary received by the generated component,
+//      for further restricting the search results (statically)
+// - formatResult (function)
+//   1. the object to format as HTML
+//   2. index of the result
+// - placeholder (string)
+//   The text to display as a placeholder in the input field.
+//
+// The generated component requires the following props:
+// - handleSelect (function)
+//   receives the object selected by the user.
+function dynamicSelector(options) {
+  return (props) => {
+    const [searchTerms, setSearchTerms] = useState('');
+    const results = options.useResults(searchTerms, props);
+
+    return (
+      <div className="dynamic-selector">
+        <div className="dropdown">
+          <input
+            autoFocus
+            type="text"
+            placeholder={options.placeholder}
+            onChange={e => setSearchTerms(e.target.value)}
+            value={searchTerms} />
+        </div>
         <div
-          className={`dropdown-values ${!edibles.length ? 'dropdown-values-empty' : ''} `}
-        >
-          {edibles.map(edible =>
-            <Edible
-              key={`${edible.type}-${edible.id}`}
-              label={edible.name}
-              handleClick={() =>
-                props.handleEdibleChange(edible)
-              }
-            />)
+          tabIndex="-1"
+          className={
+            `dropdown-values ${!results.length ? 'dropdown-values-empty' : ''} `
           }
+        >
+          {results.map((result, i) => options.formatResult(result, i, props))}
         </div>
       </div>
-    </div>
-  );
+    );
+  }
 }
+
+const EdibleSelector = dynamicSelector({
+  placeholder: "Type to find a food or recipe...",
+  useResults: (terms, props) => useEdibleSearch(terms, props.restrictTo),
+  formatResult: (edible, i, props) =>
+    <Edible
+      key={`${edible.type}-${edible.id}`}
+      label={edible.name}
+      handleClick={() =>
+        props.handleEdibleChange(edible)
+      }
+    />
+});
 
 // Component for selecting a food or recipe and then a quantity for it.
 // required props:
