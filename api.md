@@ -1,11 +1,57 @@
 Nut API
 =======
 
+# adding a new food item to the usda db
+
+`/food`
+--------
+
+### POST -- adds food item to usda db
+
+- name for the product
+- quantity
+- dictionary of the nurtient breakdown
+
+request send to backend from front end
+(to be processed)
+
+```
+{ "name": "new food",
+  "quantity": (40, "g")
+  "nutrients":
+    {
+      203: 40,
+      ...
+    }
+}
+```
+
+`/nutrients`
+-------------
+
+### GET -- retrieves documented micronutrients filtered by user input
+
+Query string parameters:
+* `search`: returned nutrients must contain this as a substring
+
+Response:
+
+```
+[ {
+    "name" : "Protein",
+    "nut id" : 203,
+    "unit" : "g"
+  },
+ ...
+]
+```
+
 `/food/:id/weights`
 ----------
 
 ### GET -- retrieves available weights for a food
-# done, check `get_weights`
+
+(done, check `get_weights`)
 
 The `food_id` is specified as part of the URL.
 
