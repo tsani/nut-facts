@@ -102,7 +102,7 @@ def add_macro_traco(consumer, python_nutrients):
 # this function will sum all the nutrients recorded on a certain day
 # paramaters: consumer, year, month, day
 def sum_day_macro(consumer, date_start):
-    date_start = date_start.replace(hour=0, minute=0, second=0)
+    date_start = date_start.replace(hour=9, minute=0, second=0)
     date_end = date_start + timedelta(days=1)
     db = sqlite3.connect('../usda-data/usda.sql3')
     c = db.cursor()
@@ -259,6 +259,7 @@ def add_recipe(recipe):
     recipe_id = c.lastrowid
 
     for ingredient in recipe["ingredients"]:
+        if not ingredient['edible']: continue
         assert ingredient['edible']['type'] == 'food'
         c.execute(
             "INSERT INTO ingredient "
