@@ -6,6 +6,8 @@ const strfdateYYYYMMDD = (date) =>
   // getMonth is 0-based; what the fuck.
   `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
 
+// Applies a transformation to or replaces a value in an array at a
+// specific index, producing a new array.
 Array.changing = (array, i, valueOrFunction) => {
   const copy = [...array]
   if(typeof valueOrFunction === 'function')
@@ -463,6 +465,95 @@ function MacroTraco(props) {
   }
 }
 
+// Widget for editing a food.
+function FoodEditor(pros) {
+
+}
+
+// Creates an editable text field
+const TextField = ({ setValue, value, ...props }) =>
+  <input value={value} onChange={e => setValue(e.target.value)} {...props} />;
+
+function dynamicListWidget({
+  renderItems, // function that renders the list (optional)
+  // If this is omitted, then the list is wrapped in a <div>
+  // renderItems(renderInside)
+  // - renderInside(): renders the inside of the list
+
+  renderItem, // function that renders a single item
+  // renderItem(item, index, setItem)
+  // - setItem: function that replaces the item or modifies the item
+  //   at this index. Passing undefined will delete the item.
+
+  renderAddItem, // function that renders a widget to add a new item
+  // renderAddItem(addItem)
+  // - addItem: appends the given item to the list of items
+}) {
+  return ({
+    items, // the items to render
+    setItems, // function to replace or modify the array of items
+  }) => {
+    return (
+      <>
+      { renderItems(() =>
+        items.map((item, index) =>
+          renderItem(item, index, (itemOrFunction) =>
+            setItems(items => Array.changing(items, index, itemOrFunction))
+          )
+        )
+      )}
+      { renderAddItem(item => setItems(items => [...items, item])) }
+      </>
+    );
+  };
+}
+
+const EMPTY_UNIT = { name: "", gramEquivalent: 0 };
+
+function UnitEditor({
+  unit,
+  setUnit,
+  ...props
+}) {
+  const { name, gramEquivalent } = unit;
+  return (
+    <div className="unit-editor-item">
+      <div>
+        <label>
+          Unit name<br/>
+          <TextField
+            className="unit-name"
+            value={name}
+            setValue={x => setUnit(u => ({...u, name: x}))}
+            placeholder="Unit name"/>
+        </label>
+      </div>
+      <div>
+        <label>
+          Gram equivalent<br/>
+          <TextField
+            className="unit-gram"
+            value={gramEquivalent}
+            setValue={x => setUnit(u => ({...u, gramEquivalent: parseInt(x)}))}
+            placeholder="Gram equivalent"/>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+// Widget for constructing a list of units for a food, with gram equivalents.
+const UnitListEditor = dynamicListWidget({
+  renderAddItem: addUnit =>
+    <button
+      type="button"
+      onClick={() => addUnit({...EMPTY_UNIT})}>
+      Add another unit
+    </button>,
+  renderItems: renderInside => <div className="unit-editor-list">{renderInside()}</div>,
+  renderItem: (unit, index, setUnit) => <UnitEditor key={index} unit={unit} setUnit={setUnit}/>,
+});
+
 function DynamicWeightedFoodList(props) {
   const addNewFood = () =>
     props.setFoods(foods => [ ...foods, {...INITIAL_EATEN} ]);
@@ -474,7 +565,6 @@ function DynamicWeightedFoodList(props) {
           return { ...oldEaten, ...newEaten };
         }
       )
-      console.log('new foods', newFoods);
       return newFoods;
     });
   }
@@ -491,7 +581,7 @@ function DynamicWeightedFoodList(props) {
         </div>
       )}
       <div>
-        <button type="button" onClick={addNewFood}>
+        <button type="button" onClick={() => addNewFood(props.foods.length)}>
           Add another ingredient
         </button>
       </div>
