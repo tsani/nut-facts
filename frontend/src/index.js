@@ -2,10 +2,6 @@ import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import './index.css';
 
-const strfdateYYYYMMDD = (date) =>
-  // getMonth is 0-based; what the fuck.
-  `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
-
 // Applies a transformation to or replaces a value in an array at a
 // specific index, producing a new array.
 Array.changing = (array, i, valueOrFunction) => {
@@ -80,10 +76,15 @@ function useConsumerNutrients(consumer) {
   const [ nutrients, setNutrients ] = useState({});
   useEffect(() => {
     if(!consumer) return;
+    const start = new Date();
+    start.setHours(4, 0, 0, 0)
+    const end = new Date();
+    end.setHours(28, 0, 0, 0)
     fetch(makeURL(
       '/eat', {
         consumer: consumer,
-        date: strfdateYYYYMMDD(new Date())
+        start: start.toISOString(),
+        end: end.toISOString(),
     }))
       .then(res => res.json())
       .then(setNutrients);

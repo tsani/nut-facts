@@ -113,9 +113,7 @@ def add_macro_traco(consumer, python_nutrients):
 
 # this function will sum all the nutrients recorded on a certain day
 # paramaters: consumer, year, month, day
-def sum_day_macro(consumer, date_start):
-    date_start = date_start.replace(hour=9, minute=0, second=0)
-    date_end = date_start + timedelta(days=1)
+def sum_day_macro(consumer, date_start, date_end):
     db = sqlite3.connect('../usda-data/usda.sql3')
     c = db.cursor()
     c.execute("""
@@ -412,9 +410,10 @@ def eat():
 
 def eat_get():
     consumer = request.args['consumer']
-    date_string = request.args['date'] # YYYY-MM-DD
-    date = datetime.strptime(date_string, '%Y-%m-%d')
-    return jsonify(sum_day_macro(consumer, date).to_dict())
+    strptime = lambda s: datetime.fromisoformat(s.replace('Z', '+00:00'))
+    date_start = strptime(request.args['start'])
+    date_end = strptime(request.args['end'])
+    return jsonify(sum_day_macro(consumer, date_start, date_end).to_dict())
 
 def eat_post():
     # keys: edible, weight, consumer (string)

@@ -140,9 +140,11 @@ The selected tracking data are summed and returned.
 
 Query string parameters are used to filter the tracking data.
 * `consumer` string: select tracking data for a specific consumer
-* `date` YYYY-MM-DD date: date to select from.
+* `start` ISO-8601 string: start time to filter from
+* `end` ISO-8601 string: end time to filter to
 
-**NOTE:** A date like `2020-06-23` refers to 4AM on that day.
+**NOTE**: The backend is expecting time strings in the format produced by JS's
+Date.prototype.toISOString().
 
 The returned data is a JSON object whose keys are nutrient names and whose
 values are tuples (lists). The first tuple component is a number and the second
