@@ -8,23 +8,35 @@ Nut API
 
 ### POST -- adds food item to usda db
 
-- name for the product
-- quantity
-- dictionary of the nurtient breakdown
-
-request send to backend from front end
-(to be processed)
+Example request:
 
 ```
-{ "name": "new food",
-  "quantity": (40, "g")
-  "nutrients":
-    {
-      203: 40,
+{ "food": {
+    "name": "new food",
+    "nutrients": [
+      { "amount": 24,
+        "nutrient": {
+          "id": 203,
+        }
+      },
       ...
-    }
+    ],
+  },
+  "amount": 40,
 }
 ```
+
+The amount for the whole food is the 'reference quantity'. This is a number of
+grams for which the given nutrient breakdown is true.
+This makes it more convenient for reading off a nutrition facts label.
+
+Response:
+
+```
+{ "id": nnn }
+```
+
+Returns the id of the newly created food.
 
 `/nutrients`
 -------------
@@ -39,7 +51,7 @@ Response:
 ```
 [ {
     "name" : "Protein",
-    "nut id" : 203,
+    "id" : 203,
     "unit" : "g"
   },
  ...
