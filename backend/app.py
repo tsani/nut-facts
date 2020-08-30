@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import json
 import sys
 from os import environ
+from contextlib import closing
 
 DATABASE_PATH = '../usda-data/usda.sql3'
 
@@ -23,6 +24,17 @@ def get_db():
         db = g._database = sqlite3.connect(DATABASE_PATH)
     return db
 
+def with_db_cursor(wrapped):
+    """Decorates a function so it allocates a database connection and
+    opens a cursor. The cursor and connection are automatically
+    cleaned up when control leaves the function."""
+    def wrapper(*args, **kwargs):
+        db = get_db()
+        with closing(db.cursor()) as cursor:
+            return wrapped(cursor, *args, **kwargs)
+    wrapper.__name__ = wrapped.__name__
+    return wrapper
+
 @app.teardown_appcontext
 def close_connection(exc):
     """Closes any database connection opened in this request."""
@@ -30,7 +42,7 @@ def close_connection(exc):
     if db is not None:
         db.close()
 
-class Food_nut_fact:
+class FoodNutFact:
     def __init__(self, nut_facts):
         self.nut_fact = nut_facts
 
@@ -45,7 +57,7 @@ class Food_nut_fact:
                 total[key] = (other[key][0] + self[key][0], other[key][1])
             else:
                 total[key] = other[key]
-        return Food_nut_fact(total)
+        return FoodNutFact(total)
     def __getitem__(self, key):
         return self.nut_fact[key]
     def __setitem__(self, key, value):
@@ -59,7 +71,7 @@ class Food_nut_fact:
         for key in self.nut_fact:
             value, unit = self.nut_fact[key]
             new_dic[key] = value * multiplicand, unit
-        return Food_nut_fact(new_dic)
+        return FoodNutFact(new_dic)
 
 def proxy(host, path):
     """ Used to proxy a request for a resource to another server. """
@@ -87,7 +99,7 @@ if IS_DEV:
 
 # adds nutrients to someone's daily tally
 def add_macro_traco(consumer, python_nutrients):
-    """Adds a Food_nut_fact to a consumer's eaten foods for today."""
+    """Adds a FoodNutFact to a consumer's eaten foods for today."""
     db = get_db()
     print("inserting into marco_traco table")
     db.execute(
@@ -114,10 +126,10 @@ def sum_day_macro(consumer, date_start):
 
     # structure of vals: dict of string, tuple (float, string) pairs
     # vals = {'nutrient' : (float amt, 'unit')}
-    total_day_nut_fact = Food_nut_fact({})
+    total_day_nut_fact = FoodNutFact({})
 
     for row in c:
-        days_nut_facts = Food_nut_fact(json.loads(row[0]))
+        days_nut_facts = FoodNutFact(json.loads(row[0]))
         total_day_nut_fact += days_nut_facts
 
     return total_day_nut_fact
@@ -181,7 +193,7 @@ def calculate_nutrients(food_id, seq_num, factor):
     # }
 
     c.close();
-    return Food_nut_fact(vals)
+    return FoodNutFact(vals)
 
 def seq_weight_in_g(food_id, seq_num):
     #gets food id and its seq num
@@ -207,7 +219,7 @@ def calculate_recipe_nutrients(recipe_id, seq_num, factor):
     FROM ingredient
     WHERE recipe_id = (?)""", (recipe_id,))
 
-    total_recipe_nut_fact = Food_nut_fact({})
+    total_recipe_nut_fact = FoodNutFact({})
     total_recipe_weight = 0
 
     for row in c:
@@ -323,6 +335,50 @@ def search():
 
     return jsonify(results)
 
+@app.route('/food', methods=['POST'])
+@with_db_cursor
+def food(cursor):
+    body = request.json
+    assert body is not None
+
+    food = body['food']
+    ref_amount = int(body['amount'])
+    nutrient_multiplier = 100 / ref_amount
+    if len(food['name']) == 0:
+        return jsonify({'message': 'food name must be nonempty'}), 400
+
+    cursor.execute('BEGIN')
+    cursor.execute(
+        'INSERT INTO food '
+        '( food_group_id, long_desc, nitrogen_factor, '
+        'protein_factor, fat_factor, calorie_factor, refuse ) '
+        'VALUES '
+        # 2200 is the food group id for meals
+        '( 2200, ?, 0, 0, 0, 0, 0)',
+        (food['name'],)
+    )
+    food_id = cursor.lastrowid
+    for nutrient in food['nutrients']:
+        scaled_amount = int(nutrient['amount']) * nutrient_multiplier
+        nut_id = nutrient['nutrient']['id']
+        cursor.execute(
+            'INSERT INTO nutrition '
+            '( food_id, nutrient_id, amount, num_data_points, source_code ) '
+            'VALUES ( ?, ?, ?, 0, \'\' ) ',
+            ( food_id, nut_id, scaled_amount, ),
+        )
+    for seq_num, unit in enumerate(food['units']):
+        cursor.execute(
+            'INSERT INTO weight '
+            '( food_id, sequence_num, amount, description, gm_weight ) '
+            'VALUES ( ?, ?, ?, ?, ? )',
+            ( food_id, seq_num + 1, 1, unit['name'], unit['gramEquivalent'] ),
+        )
+
+    cursor.execute('COMMIT')
+
+    return jsonify({ 'id': food_id })
+
 @app.route('/food/<food_id>/weights')
 def weights(food_id):
     return jsonify(get_weights(int(food_id)))
@@ -344,7 +400,6 @@ def calculate_edible_nutrients(edible, weight):
         int(weight['seq_num']),
         float(weight['amount'])
     )
-    assert type(d) == Food_nut_fact
     return d
 
 @app.route('/eat', methods=['GET', 'POST'])
@@ -404,6 +459,15 @@ def recipes():
     assert recipe is not None
     add_recipe(recipe)
     return jsonify({})
+
+@app.route('/nutrients')
+@with_db_cursor
+def nutrients(cursor):
+    name = request.args.get('search')
+    assert name is not None
+    cursor.execute('SELECT id, units, name FROM nutrient WHERE name LIKE ?', ('%' + name + '%',))
+    results = [ { "id": row[0], "unit": row[1], "name": row[2] } for row in cursor ]
+    return jsonify(results)
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'test':
