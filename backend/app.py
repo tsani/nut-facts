@@ -357,7 +357,7 @@ def food(cursor):
     )
     food_id = cursor.lastrowid
     for nutrient in food['nutrients']:
-        scaled_amount = int(nutrient['amount']) * nutrient_multiplier
+        scaled_amount = float(nutrient['amount']) * nutrient_multiplier
         nut_id = nutrient['nutrient']['id']
         cursor.execute(
             'INSERT INTO nutrition '
