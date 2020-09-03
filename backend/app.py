@@ -309,12 +309,20 @@ def list_foods_recipes(search_terms, restrict_to=None):
     c = conn.cursor()
     results = []
     if 'recipe' in restrict_to:
-        c.execute('SELECT id, name FROM recipe WHERE ' + condition_recipe + ' LIMIT 100')
+        c.execute(
+            'SELECT id, name FROM recipe WHERE '
+            + condition_recipe
+            + ' ORDER BY id DESC LIMIT 100'
+        )
         results.extend(
             {"id": row[0], "type": "recipe", "name":row[1]} for row in c
         )
     if 'food' in restrict_to:
-        c.execute('SELECT id, long_desc FROM food WHERE ' + condition_usda + ' LIMIT 100')
+        c.execute(
+            'SELECT id, long_desc FROM food WHERE '
+            + condition_usda
+            + ' ORDER BY id DESC LIMIT 100'
+        )
         results.extend(
             {"id": row[0], "type": "food", "name":row[1]} for row in c
         )
