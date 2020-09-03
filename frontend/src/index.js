@@ -13,6 +13,13 @@ Array.changing = (array, i, valueOrFunction) => {
   return copy;
 };
 
+// Returns a new array with the given index removed.
+Array.deleting = (array, i) => {
+  const dup = [...array];
+  dup.splice(i, 1);
+  return dup;
+};
+
 function makeURL(path, qs) {
   if(qs)
     return path + '?' + new URLSearchParams(qs).toString();
@@ -50,23 +57,39 @@ function getSearchResults(terms, restrictTo) {
     return new Promise( (resolve, reject) => resolve([]) );
 }
 
+// Retrieves the nutrients for a given edible with a given quantity.
+async function getNutrients(edible, weight) {
+  const res = await fetch(makeURL('/macros', {
+    id: edible.id,
+    type: edible.type,
+    amount: weight.amount,
+    seq_num: weight.seq_num,
+  }));
+  return await res.json();
+}
+
+async function getConsumerNutrients(consumer, start, end) {
+  const res = await fetch(makeURL(
+    '/eat', {
+      consumer: consumer,
+      start: start.toISOString(),
+      end: end.toISOString(),
+  }));
+  return await res.json();
+}
+
 function useNutrients(edible, weight) {
   const [ nutrients, setNutrients ] = useState({});
-  useEffect(() => {
-    if(!edible || !edible.id || !edible.type || !weight || !weight.amount)
-      return;
-    if(weight.amount <= 0)
-      return;
 
-    fetch(makeURL(
-      '/macros', {
-        id: edible.id,
-        type: edible.type,
-        amount: weight.amount,
-        seq_num: weight.seq_num,
-    }))
-      .then(res => res.json())
-      .then(setNutrients);
+  useEffect(() => {
+    (async () => {
+      if(!edible || !edible.id || !edible.type || !weight || !weight.amount)
+        return;
+      if(weight.amount <= 0)
+        return;
+
+      setNutrients(await getNutrients(edible, weight));
+    })()
   }, [edible, weight]);
 
   return nutrients;
@@ -74,20 +97,16 @@ function useNutrients(edible, weight) {
 
 function useConsumerNutrients(consumer) {
   const [ nutrients, setNutrients ] = useState({});
+
   useEffect(() => {
-    if(!consumer) return;
-    const start = new Date();
-    start.setHours(4, 0, 0, 0)
-    const end = new Date();
-    end.setHours(28, 0, 0, 0)
-    fetch(makeURL(
-      '/eat', {
-        consumer: consumer,
-        start: start.toISOString(),
-        end: end.toISOString(),
-    }))
-      .then(res => res.json())
-      .then(setNutrients);
+    (async () => {
+      if(!consumer) return;
+      const start = new Date();
+      start.setHours(4, 0, 0, 0)
+      const end = new Date();
+      end.setHours(28, 0, 0, 0)
+      setNutrients(await getConsumerNutrients(consumer, start, end));
+    })()
   }, [consumer]);
 
   return nutrients;
@@ -133,7 +152,7 @@ const MACRO_KEYS = [ 'Energy', 'Protein', 'Carbohydrate, by difference', 'Total 
 const onlyMacros = (nutrients) => {
   let res = {}
   for (const k of MACRO_KEYS) {
-    res[k] = nutrients[k]
+    if(k in nutrients) res[k] = nutrients[k]
   }
   return res
 }
@@ -152,8 +171,12 @@ const Spinner = (props) => <span className="lds-dual-ring"></span>;
 const WeightPicker =
   withLoading(
     Spinner,
-    (props) => {
-      const handleFocus = props.handleFocus;
+    ({ handleFocus, weight, weights, setWeight, edibleId }) => {
+      const [
+        [ amount, setAmount ],
+        [ seqNum, setSeqNum ],
+      ] = lens(weight, setWeight, ['amount', 'seq_num']);
+
       return (
         <div className="weight-picker">
           <input
@@ -161,23 +184,19 @@ const WeightPicker =
             name="amount"
             onFocus={() => handleFocus(true)}
             onBlur={() => handleFocus(false)}
-            value={props.weight && props.weight.amount}
-            onChange={event =>
-              props.handleChange({[event.target.name]: event.target.value})
-            }
+            value={amount}
+            onChange={event => setAmount(event.target.value)}
           />
           <select
             name="seq_num"
             onFocus={() => handleFocus(true)}
             onBlur={() => handleFocus(false)}
-            onChange={e =>
-              props.handleChange({[e.target.name]: parseInt(e.target.value)})
-            }
+            onChange={e => setSeqNum(parseInt(e.target.value))}
           >
-            { props.weights.map(unit =>
+            { weights.map(unit =>
               <option
                 name="seq_num"
-                key={`${props.edibleId}-${unit.seq_num}`}
+                key={`${edibleId}-${unit.seq_num}`}
                 value={unit.seq_num}
                 onFocus={() => handleFocus(true)}
                 onBlur={() => handleFocus(false)}
@@ -204,8 +223,9 @@ function NutrientDetails(props) {
     return null;
 
   const nonzeroAmount = ([_1, [amount, _2]]) => amount >= 1;
-  const toNiceNutrientName = ([nutrientName, _1]) =>
-    [ nutrientName.split(",")[0], _1 ];
+  const toNiceNutrientName = x => x;
+  // const toNiceNutrientName = ([nutrientName, _1]) =>
+  //   [ nutrientName.split(",")[0], _1 ];
 
   return (
     <table className="nutrient-list">
@@ -229,21 +249,25 @@ function NutrientDetails(props) {
 
 function useNutrientSearch(searchTerms) {
   const [ nutrients, setNutrients ] = useState([]);
-  useEffect(() =>
+  useEffect(() => {
     fetch(makeURL('/nutrients', { search: searchTerms }))
       .then(res => res.json())
-      .then(setNutrients),
-            [searchTerms]);
+      .then(setNutrients)
+  }, [searchTerms]);
   return nutrients;
 }
 
 const NutrientSelector = dynamicSelector({
   useResults: useNutrientSearch,
   placeholder: "Type the name of a nutrient",
-  formatResult: (nutrient) =>
-    <button data-nutrient-id={nutrient.id} type="button">
-      {nutrient.name}
-    </button>
+  formatResult: (nutrient, _index, select) =>
+    <button
+      key={nutrient.id}
+      type="button"
+      onClick={() => select()}
+    >
+      {nutrient.name} ({nutrient.unit})
+    </button>,
 });
 
 // generates a _dynamic selector_, which is a text field that obtains
@@ -254,13 +278,15 @@ const NutrientSelector = dynamicSelector({
 //   2. the whole props dictionary received by the generated component,
 //      for further restricting the search results (statically)
 // - formatResult (function)
-//   1. the object to format as HTML
-//   2. index of the result
+//   formatResult(object, index, select)
+//   - object: the object to format as HTML
+//   - index: of the object
+//   - select(): function that triggers selection of this object
 // - placeholder (string)
 //   The text to display as a placeholder in the input field.
 //
 // The generated component requires the following props:
-// - handleSelect (function)
+// - onSelect (function)
 //   receives the object selected by the user.
 function dynamicSelector(options) {
   return (props) => {
@@ -283,7 +309,10 @@ function dynamicSelector(options) {
             `dropdown-values ${!results.length ? 'dropdown-values-empty' : ''} `
           }
         >
-          {results.map((result, i) => options.formatResult(result, i, props))}
+          { results.map((result, i) =>
+            options.formatResult(result, i, () =>
+              props.onSelect(result)))
+          }
         </div>
       </div>
     );
@@ -293,30 +322,37 @@ function dynamicSelector(options) {
 const EdibleSelector = dynamicSelector({
   placeholder: "Type to find a food or recipe...",
   useResults: (terms, props) => useEdibleSearch(terms, props.restrictTo),
-  formatResult: (edible, i, props) =>
+  formatResult: (edible, i, select) =>
     <Edible
       key={`${edible.type}-${edible.id}`}
       label={edible.name}
-      handleClick={() =>
-        props.handleEdibleChange(edible)
-      }
+      handleClick={() => select()}
     />
 });
+
+// Component that renders an X floating to the right.
+// When clicked, calls onCancel.
+const CancelButton = ({onCancel}) =>
+  <span
+    className="cancel-button"
+    onClick={() => onCancel()}>
+    X
+  </span>;
 
 // Component for selecting a food or recipe and then a quantity for it.
 // required props:
 // - eaten, with keys 'edible' and 'weight'
-function WeightedEdibleSelector(props) {
-  const weights = useEdibleWeights(props.eaten.edible);
-  const nutrients = useNutrients(props.eaten.edible, props.eaten.weight);
-  const [ weightFocused, setWeightFocused ] = useState(false);
+function WeightedEdibleSelector({ eaten, setEaten }) {
+  const weights = useEdibleWeights(eaten.edible);
+  const nutrients = useNutrients(eaten.edible, eaten.weight);
 
-  if(null === props.eaten.edible) {
+  const [ weightFocused, setWeightFocused ] = useState(false);
+  const [ weight, setWeight ] = lens(eaten, setEaten, 'weight');
+
+  if(null === eaten.edible) {
     return (
       <EdibleSelector
-        handleEdibleChange={(edible) =>
-          props.handleEatenChange({edible: edible})
-        }
+        onSelect={(edible) => setEaten(eaten => ({...eaten, edible: edible}))}
       />
     );
   }
@@ -324,19 +360,13 @@ function WeightedEdibleSelector(props) {
     return (
       <div className="edible-selector">
         <div className="selected-edible">
-          <span
-            className="cancel-edible-selection"
-            onClick={() => props.handleEatenChange({edible: null})}>
-            X
-          </span>
-          {props.eaten.edible.name}
+          <CancelButton onCancel={() => setEaten({edible: null})}/>
+          {eaten.edible.name}
         </div>
         <WeightPicker
-          edibleId={props.eaten.edible.id}
-          weight={props.eaten.weight}
-          handleChange={weight =>
-            props.handleEatenChange({weight: {...props.eaten.weight, ...weight}})
-          }
+          edibleId={eaten.edible.id}
+          weight={weight}
+          setWeight={setWeight}
           handleFocus={setWeightFocused}
           weights={weights}
           ready={weights}
@@ -349,31 +379,27 @@ function WeightedEdibleSelector(props) {
   }
 }
 
-function EatSomething(props) {
+function EatSomething({eaten, setEaten, onSubmit}) {
+  const [ consumer, setConsumer ] = lens(eaten, setEaten, 'consumer');
+
   return (
-    <form onSubmit={props.handleSubmit}>
+    <form onSubmit={onSubmit}>
       <WeightedEdibleSelector
-        eaten={props.eaten}
-        handleEatenChange={props.handleEatenChange}
+        eaten={eaten}
+        setEaten={setEaten}
       />
       <EnableIf
-        condition={null !== props.eaten.edible && null !== props.eaten.amount}
+        condition={null !== eaten.edible && null !== eaten.amount}
       >
-        <label htmlFor="consumer">
+        <label>
           <span className="label-text">Consumer</span>
-
-          <input
-            name="consumer"
-            type="text"
-            placeholder="Your name"
-            value={props.eaten.consumer}
-            onChange={e =>
-              props.handleEatenChange({[e.target.name]: e.target.value})
-            }
-          />
+          <TextField
+            value={consumer}
+            setValue={setConsumer}
+            placeholder="Your name" />
         </label>
       </EnableIf>
-      <EnableIf condition={props.eaten.edible && props.eaten.consumer}>
+      <EnableIf condition={eaten.edible && eaten.consumer}>
         <div><input type="submit" value="I ate it!" /></div>
       </EnableIf>
     </form>
@@ -421,8 +447,6 @@ function MacroTraco(props) {
   const [ error, setError ] = useState(false);
   const [ counter, setCounter ] = useState(0);
 
-  const handleEatenChange = (e) => setEaten({...eaten, ...e});
-
   const handleSubmit = () => {
     exFetch(setSubmitting, '/eat', {
       method: 'POST',
@@ -454,8 +478,8 @@ function MacroTraco(props) {
           </EnableIf>
           <EatSomething
             eaten={eaten}
-            handleEatenChange={handleEatenChange}
-            handleSubmit={handleSubmit}
+            setEaten={setEaten}
+            onSubmit={handleSubmit}
           />
         </div>
       </div>
@@ -466,16 +490,23 @@ function MacroTraco(props) {
   }
 }
 
-// Widget for editing a food.
-function FoodEditor(pros) {
-
-}
-
 // Creates an editable text field
 const TextField = ({ setValue, value, ...props }) =>
-  <input value={value} onChange={e => setValue(e.target.value)} {...props} />;
+  <input
+    value={value}
+    onChange={e => setValue(e.target.value)}
+    {...props} />;
+
+const CheckBox = ({ setValue, value, ...props }) =>
+  <input
+    type="checkbox"
+    checked={value}
+    onChange={e => setValue(e.target.checked)}
+    {...props} />;
 
 function dynamicListWidget({
+  renderOnEmpty, // element to render when the list is empty (optional)
+
   renderItems, // function that renders the list (optional)
   // If this is omitted, then the list is wrapped in a <div>
   // renderItems(renderInside)
@@ -494,18 +525,29 @@ function dynamicListWidget({
     items, // the items to render
     setItems, // function to replace or modify the array of items
   }) => {
-    return (
-      <>
-      { renderItems(() =>
-        items.map((item, index) =>
-          renderItem(item, index, (itemOrFunction) =>
-            setItems(items => Array.changing(items, index, itemOrFunction))
-          )
-        )
-      )}
-      { renderAddItem(item => setItems(items => [...items, item])) }
-      </>
-    );
+    if(items.length === 0 && renderOnEmpty)
+      return <>
+        {renderOnEmpty}
+        { renderAddItem(item => setItems(items => [...items, item])) }
+      </>;
+    else {
+      return (
+        <>
+          { renderItems(() =>
+            items.map((item, index) =>
+              renderItem(item, index, (itemOrFunction) =>
+                setItems(items =>
+                  itemOrFunction === null ?
+                  Array.deleting(items, index) :
+                  Array.changing(items, index, itemOrFunction)
+                )
+              )
+            )
+            )}
+          { renderAddItem(item => setItems(items => [...items, item])) }
+        </>
+      );
+    }
   };
 }
 
@@ -516,17 +558,24 @@ function UnitEditor({
   setUnit,
   ...props
 }) {
-  const { name, gramEquivalent } = unit;
+  const [
+    [ name, setName ],
+    [ gramEquivalent, setGramEquivalent ],
+  ] = lens(unit, setUnit, [ 'name', 'gramEquivalent' ]);
+
   return (
-    <div className="unit-editor-item">
+    <div className="unit-editor-item card">
+      <CancelButton onCancel={() => setUnit(null)} />
       <div>
         <label>
           Unit name<br/>
           <TextField
             className="unit-name"
             value={name}
-            setValue={x => setUnit(u => ({...u, name: x}))}
-            placeholder="Unit name"/>
+            setValue={setName}
+            placeholder="Unit name"
+            autoFocus
+          />
         </label>
       </div>
       <div>
@@ -535,7 +584,7 @@ function UnitEditor({
           <TextField
             className="unit-gram"
             value={gramEquivalent}
-            setValue={x => setUnit(u => ({...u, gramEquivalent: parseInt(x)}))}
+            setValue={setGramEquivalent}
             placeholder="Gram equivalent"/>
         </label>
       </div>
@@ -545,6 +594,7 @@ function UnitEditor({
 
 // Widget for constructing a list of units for a food, with gram equivalents.
 const UnitListEditor = dynamicListWidget({
+  renderOnEmpty: <p> No units in this food. </p>,
   renderAddItem: addUnit =>
     <button
       type="button"
@@ -552,42 +602,209 @@ const UnitListEditor = dynamicListWidget({
       Add another unit
     </button>,
   renderItems: renderInside => <div className="unit-editor-list">{renderInside()}</div>,
-  renderItem: (unit, index, setUnit) => <UnitEditor key={index} unit={unit} setUnit={setUnit}/>,
+  renderItem: (unit, index, setUnit) =>
+    <UnitEditor key={index} unit={unit} setUnit={setUnit} />,
 });
 
-function DynamicWeightedFoodList(props) {
-  const addNewFood = () =>
-    props.setFoods(foods => [ ...foods, {...INITIAL_EATEN} ]);
-
-  const handleEatenChange = (newEaten, i) => {
-    props.setFoods(foods => {
-      let newFoods = Array.changing(
-        foods, i, oldEaten => {
-          return { ...oldEaten, ...newEaten };
-        }
-      )
-      return newFoods;
-    });
+const DynamicWeightedFoodList = dynamicListWidget({
+  renderOnEmpty: <p> No foods in this recipe. </p>,
+  renderAddItem: addFood =>
+    <div>
+      <button type="button" onClick={() => addFood({...INITIAL_EATEN})}>
+        Add another ingredient
+      </button>
+    </div>,
+  renderItems: renderInside =>
+    <div className="weighted-foods-list"> {renderInside()} </div>,
+  renderItem: (eaten, index, setEaten) => {
+    return <div key={index} className="weighted-foods-list-item card">
+      <CancelButton onCancel={() => setEaten(null)} />
+      <h4>Ingredient #{index+1}</h4>
+      <WeightedEdibleSelector
+        eaten={eaten}
+        setEaten={setEaten}
+      />
+    </div>
   }
+});
+
+// generates an empty food object, with no units and no nutrients
+const EMPTY_FOOD = () => ({
+  id: null,
+  units: [],
+  name: '',
+  nutrients: [],
+});
+
+const EMPTY_WEIGHTED_FOOD = () => ({
+  food: EMPTY_FOOD(),
+  amount: 0,
+});
+
+const lens_ = (value, setter, key) => [
+  value[key],
+  (xOrF) =>
+    (typeof xOrF === 'function') ?
+    setter(obj => ({...obj, [key]: xOrF(obj[key])})) :
+    setter(obj => ({...obj, [key]: xOrF}))
+];
+
+// Construct a getter and setter for a component of an object that
+// reconstructs the object.
+const lens = (value, setter, key) => {
+  return Array.isArray(key) ?
+  key.map(key => lens_(value, setter, key)) :
+  lens_(value, setter, key);
+}
+
+function FoodEditor ({food, setFood}) {
+  const [
+    [ name, setName ],
+    [ units, setUnits ],
+    [ nutrients, setNutrients ],
+  ] = lens(food, setFood, ['name', 'units', 'nutrients']);
 
   return (
-    <div className="weighted-foods-list">
-      { props.foods.map((weightedFood, i) =>
-        <div key={i} className="weighted-foods-list-item">
-          <h4>Ingredient #{i+1}</h4>
-          <WeightedEdibleSelector
-            eaten={weightedFood}
-            handleEatenChange={eaten => handleEatenChange(eaten, i)}
-          />
-        </div>
-      )}
-      <div>
-        <button type="button" onClick={() => addNewFood(props.foods.length)}>
-          Add another ingredient
-        </button>
+    <div className="food-editor">
+      <div className="food-editor-name">
+        <TextField
+          value={name}
+          setValue={setName}
+          placeholder="Name of food" />
       </div>
+      <h3>Units</h3>
+      <UnitListEditor items={units} setItems={setUnits} />
+      <h3>Nutrients</h3>
+      <FoodNutrientListEditor items={nutrients} setItems={setNutrients} />
     </div>
   );
+}
+
+function FoodEditorManager({}) {
+  const [ isNewFood, _setIsNewFood ] = useState(true);
+  const [ submitting, setSubmitting ] = useState(false);
+  const [ error, setError ] = useState(false);
+  const [ weightedFood, setWeightedFood ] = useState(EMPTY_WEIGHTED_FOOD());
+  const [
+    [ food, setFood ],
+    [ amount, setAmount ],
+  ] = lens(weightedFood, setWeightedFood, ['food', 'amount']);
+
+  const setIsNewFood = x => {
+    if(x) {
+      setFood(EMPTY_FOOD());
+    }
+    _setIsNewFood(x);
+  }
+
+  const selectExistingFood = (food) => {
+    const {name, id, nutrients, units} = food;
+    setFood({ name: name, id: id, nutrients: nutrients, units: units});
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const result = await createFood(weightedFood, setSubmitting);
+    const error = undefined === result;
+    setError(error);
+    if(error) return;
+    setWeightedFood(EMPTY_WEIGHTED_FOOD());
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="food-editor-manager">
+      <h2> Add or edit a food </h2>
+      New food?&nbsp;<CheckBox value={isNewFood} setValue={setIsNewFood} />
+      <EnableIf condition={!isNewFood}>
+        <EdibleSelector restrictTo="food" handleEdibleChange={selectExistingFood}/>
+      </EnableIf>
+      <EnableIf condition={isNewFood || food.id !== null}>
+        <FoodEditor food={food} setFood={setFood} />
+        <div className="reference-quantity">
+          <label>
+            Reference quantity<br/>
+            <TextField
+              value={amount}
+              setValue={setAmount}/>
+          </label>
+        </div>
+      </EnableIf>
+      <EnableIf condition={!submitting}>
+        <button> Submit </button>
+      </EnableIf>
+      <EnableIf condition={submitting}>
+        <Spinner />
+      </EnableIf>
+    </form>
+  );
+}
+
+const EMPTY_NUTRIENT = {
+  id: null,
+  unit: '',
+  name: '',
+};
+
+const EMPTY_WEIGHTED_NUTRIENT = () => ({
+  nutrient: {...EMPTY_NUTRIENT},
+  amount: 0,
+});
+
+function NutrientEditor({weightedNutrient, setWeightedNutrient}) {
+  const [
+    [ nutrient, setNutrient ],
+    [ amount, setAmount ],
+  ] = lens(weightedNutrient, setWeightedNutrient, ['nutrient', 'amount']);
+
+  if(null === nutrient.id)
+    return (
+      <div className="nutrient-selector">
+        <NutrientSelector onSelect={setNutrient} />
+      </div>
+    );
+
+  return (
+    <div className="nutrient-selector">
+      <div className="nutrient-name"> {nutrient.name} ({nutrient.unit}) </div>
+      <TextField
+        placeholder={`Amount in ${nutrient.unit}`}
+        value={amount}
+        setValue={setAmount} />
+    </div>
+  );
+}
+
+const FoodNutrientListEditor = dynamicListWidget({
+  renderOnEmpty: <p> No nutrients in this food. </p>,
+  renderAddItem: addNutrient =>
+    <button
+      type="button"
+      onClick={() => addNutrient({... EMPTY_WEIGHTED_NUTRIENT()})}>
+      Add another nutrient
+    </button>,
+  renderItems: renderInside => <div className="food-nutrient-list">{renderInside()}</div>,
+  renderItem: (weightedNutrient, index, setWeightedNutrient) =>
+    <div key={index} className="food-nutrient-list-item card">
+      <CancelButton onCancel={() => setWeightedNutrient(null)} />
+      <h4> Nutrient #{index+1} </h4>
+      <NutrientEditor
+        weightedNutrient={weightedNutrient}
+        setWeightedNutrient={setWeightedNutrient}/>
+    </div>,
+});
+
+const optionalFunction = (f) => undefined !== f ? f : () => { return; };
+
+async function createFood(weightedFood, setStatus) {
+  const res = await exFetch(optionalFunction(setStatus), '/food', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(weightedFood),
+  });
+  if(res.ok)
+    return await res.json();
+  else
+    return undefined;
 }
 
 // A recipe is a list of foods + weights
@@ -605,20 +822,18 @@ function RecipeEditor(props) {
   const handleIsNewRecipeChange = (e) => setIsNewRecipe(e.target.checked);
   const handleNewRecipeNameChange = (e) => setNewRecipeName(e.target.value);
 
-  const handleSubmit = () => {
-    exFetch(setSubmitting, '/recipes', {
+  const handleSubmit = async () => {
+    const res = await exFetch(setSubmitting, '/recipes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: newRecipeName,
         ingredients: foods,
       })
-    })
-      .then(res => {
-        setError(!res.ok);
-        if(!res.ok) return;
-        setFoods([]);
-      });
+    });
+    setError(!res.ok);
+    if(!res.ok) return;
+    setFoods([]);
   };
 
   return (
@@ -628,11 +843,10 @@ function RecipeEditor(props) {
         <p> Oops, something went wrong. </p>
       </EnableIf>
       <form action="javascript:void(0);" onSubmit={handleSubmit}>
-        <label htmlFor="is-new-recipe">
+        <label>
           New recipe?&nbsp;
           <input
             type="checkbox"
-            id="is-new-recipe"
             name="is-new-recipe"
             checked={isNewRecipe}
             onChange={handleIsNewRecipeChange}
@@ -652,8 +866,8 @@ function RecipeEditor(props) {
         </EnableIf>
 
         <DynamicWeightedFoodList
-          foods={foods}
-          setFoods={setFoods}
+          items={foods}
+          setItems={setFoods}
         />
 
         <input type="submit" value="Add this recipe" />
@@ -667,6 +881,7 @@ function App(props) {
     <>
     <MacroTraco/>
     <RecipeEditor/>
+    <FoodEditorManager/>
     </>
   );
 }

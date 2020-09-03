@@ -45,7 +45,7 @@ div.dropdown .edible:hover {
     cursor: pointer;
 }
 
-div.selected-edible .cancel-edible-selection {
+.cancel-button {
     float: right;
     cursor: pointer;
 }
@@ -92,4 +92,51 @@ div.nutrient-list-item > * {
 div.day-macros {
     display: flex;
     flex-flow: row wrap;
+}
+
+.card {
+    /* Add shadows to create the "card" effect */
+    box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2);
+    transition: 0.3s;
+
+    padding: 0.5em 0.25em;
+}
+
+/* On mouse-over, add a deeper shadow */
+.card:hover {
+    box-shadow: 0 8px 16px 0 rgba(0,0,0,0.2);
+}
+
+div.edible-selector {
+    margin: 1em 0;
+}
+
+.weighted-foods-list-item {
+    margin: 1em 0;
+}
+
+.weighted-foods-list-item h4 {
+    margin-top: 0;
+    margin-bottom: 1em;
+}
+
+.unit-editor-item {
+    margin: 1em 0;
+}
+
+.unit-editor-item > * {
+    margin: 0.5em 0;
+}
+
+.food-nutrient-list-item {
+    margin: 1em 0;
+}
+
+.food-nutrient-list-item h4 {
+    margin-top: 0;
+    margin-bottom: 1em;
+}
+
+div.reference-quantity {
+    margin: 1em 0;
 }
