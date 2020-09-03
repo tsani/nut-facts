@@ -227,21 +227,22 @@ function NutrientDetails(props) {
   // const toNiceNutrientName = ([nutrientName, _1]) =>
   //   [ nutrientName.split(",")[0], _1 ];
 
-  return (
+  const innards = Object
+    .entries(props.nutrients)
+    .filter(nonzeroAmount)
+    .map(toNiceNutrientName)
+    .map( ([nutrientName, [amount, unit]]) =>
+      <tr key={nutrientName} className="nutrient-list-item">
+        <td className="nutrient-name"> {nutrientName} </td>
+        <td className="nutrient-amount"> {amount.toFixed(0)} </td>
+        <td className="nutrient-unit"> {unit} </td>
+      </tr>
+    );
+
+  return innards.length === 0 ? null : (
     <table className="nutrient-list">
       <tbody>
-      { Object
-        .entries(props.nutrients)
-        .filter(nonzeroAmount)
-        .map(toNiceNutrientName)
-        .map( ([nutrientName, [amount, unit]]) =>
-          <tr key={nutrientName} className="nutrient-list-item">
-            <td className="nutrient-name"> {nutrientName} </td>
-            <td className="nutrient-amount"> {amount.toFixed(0)} </td>
-            <td className="nutrient-unit"> {unit} </td>
-          </tr>
-      )
-      }
+      { innards }
       </tbody>
     </table>
   );
@@ -342,7 +343,7 @@ const CancelButton = ({onCancel}) =>
 // Component for selecting a food or recipe and then a quantity for it.
 // required props:
 // - eaten, with keys 'edible' and 'weight'
-function WeightedEdibleSelector({ eaten, setEaten }) {
+function WeightedEdibleSelector({ eaten, setEaten, resetEaten }) {
   const weights = useEdibleWeights(eaten.edible);
   const nutrients = useNutrients(eaten.edible, eaten.weight);
 
@@ -360,7 +361,7 @@ function WeightedEdibleSelector({ eaten, setEaten }) {
     return (
       <div className="edible-selector">
         <div className="selected-edible">
-          <CancelButton onCancel={() => setEaten({edible: null})}/>
+          <CancelButton onCancel={() => resetEaten()}/>
           {eaten.edible.name}
         </div>
         <WeightPicker
@@ -379,7 +380,7 @@ function WeightedEdibleSelector({ eaten, setEaten }) {
   }
 }
 
-function EatSomething({eaten, setEaten, onSubmit}) {
+function EatSomething({eaten, setEaten, resetEaten, onSubmit}) {
   const [ consumer, setConsumer ] = lens(eaten, setEaten, 'consumer');
 
   return (
@@ -387,6 +388,7 @@ function EatSomething({eaten, setEaten, onSubmit}) {
       <WeightedEdibleSelector
         eaten={eaten}
         setEaten={setEaten}
+        resetEaten={resetEaten}
       />
       <EnableIf
         condition={null !== eaten.edible && null !== eaten.amount}
@@ -480,6 +482,7 @@ function MacroTraco(props) {
             eaten={eaten}
             setEaten={setEaten}
             onSubmit={handleSubmit}
+            resetEaten={() => setEaten({...INITIAL_EATEN})}
           />
         </div>
       </div>
@@ -606,6 +609,8 @@ const UnitListEditor = dynamicListWidget({
     <UnitEditor key={index} unit={unit} setUnit={setUnit} />,
 });
 
+// A dynamic list of foods together with weights for them.
+// This is used to configure the ingredients of a recipe.
 const DynamicWeightedFoodList = dynamicListWidget({
   renderOnEmpty: <p> No foods in this recipe. </p>,
   renderAddItem: addFood =>
@@ -623,6 +628,7 @@ const DynamicWeightedFoodList = dynamicListWidget({
       <WeightedEdibleSelector
         eaten={eaten}
         setEaten={setEaten}
+        resetEaten={() => setEaten({...INITIAL_EATEN})}
       />
     </div>
   }
